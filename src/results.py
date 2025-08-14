@@ -15,7 +15,6 @@ from sklearn.metrics import accuracy_score, classification_report, ConfusionMatr
 import tempfile
 import mlflow
 from tqdm import tqdm
-from omegaconf import OmegaConf # 修正2のために追加
 from .config_schema import AppConfig
 from cebra.integrations.sklearn.metrics import consistency_score
 from cebra import plot_consistency
@@ -192,3 +191,4 @@ def run_consistency_check(X_train, X_valid, cfg: AppConfig, output_dir: Path):
         # Figureを閉じる
         plt.close(ax.figure)
         mlflow.log_artifact(str(plot_path), "plots")
+
