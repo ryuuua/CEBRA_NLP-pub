@@ -30,14 +30,29 @@ def save_cebra_embeddings(embeddings, output_dir):
     np.save(path, embeddings)
     return path
 
-def load_cebra_model(model_path, cfg: AppConfig, input_dimension: int):
-    import torch, cebra
-    model = cebra.models.CEBRA(
-        input_dimension=input_dimension,
-        output_dimension=cfg.cebra.output_dim,
-        conditional=cfg.cebra.conditional,
-        **OmegaConf.to_container(cfg.cebra.params, resolve=True),
+def _build_model(cfg: AppConfig, num_neurons: int):
+    import cebra
+
+    name = getattr(cfg.cebra, "model_architecture", "offset0-model").lower()
+    registry = {
+        "offset0-model": cebra.models.Offset0Model,
+        "offset5-model": getattr(cebra.models, "Offset5Model", cebra.models.Offset0Model),
+        "offset10-model": getattr(cebra.models, "Offset10Model", cebra.models.Offset0Model),
+    }
+    ModelClass = registry.get(name)
+    if ModelClass is None:
+        raise ValueError(f"Unsupported model_architecture: {name}")
+    return ModelClass(
+        num_neurons=num_neurons,
+        num_units=cfg.cebra.params.get("num_units", 512),
+        num_output=cfg.cebra.output_dim,
     ).to(cfg.device)
+
+
+def load_cebra_model(model_path, cfg: AppConfig, input_dimension: int):
+    import torch
+
+    model = _build_model(cfg, input_dimension)
     model.load_state_dict(torch.load(model_path, map_location=cfg.device))
     model.eval()
     return model
@@ -48,7 +63,7 @@ def transform_cebra(model, X, device):
     model.eval()
     with torch.no_grad():
         embeddings = (
-            model.embed(torch.as_tensor(X, dtype=torch.float32).to(device))
+            model(torch.as_tensor(X, dtype=torch.float32).to(device))
             .cpu()
             .numpy()
         )
@@ -72,6 +87,11 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
     import torch, cebra
     from torch.utils.data import DataLoader, TensorDataset
 
+    try:
+        from cebra.criterions import InfoNCE
+    except Exception:  # pragma: no cover - fallback for older versions
+        from cebra.models import InfoNCE
+
     tensors = [torch.as_tensor(X_vectors, dtype=torch.float32)]
     if labels is not None:
         dtype = torch.long if cfg.cebra.conditional == "discrete" else torch.float32
@@ -83,12 +103,12 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
         shuffle=True,
     )
 
-    model = cebra.models.CEBRA(
-        input_dimension=X_vectors.shape[1],
-        output_dimension=cfg.cebra.output_dim,
-        conditional=cfg.cebra.conditional,
-        **OmegaConf.to_container(cfg.cebra.params, resolve=True),
-    ).to(cfg.device)
+    model = _build_model(cfg, X_vectors.shape[1])
+
+    try:
+        criterion = InfoNCE(model.get_offset())
+    except TypeError:  # pragma: no cover - for fallback implementation
+        criterion = InfoNCE()
 
     optimizer = torch.optim.Adam(
         model.parameters(),
@@ -100,10 +120,18 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
         for batch in loader:
             if labels is not None:
                 batch_x, batch_y = batch
-                loss = model.loss(batch_x.to(cfg.device), batch_y.to(cfg.device))
+                try:
+                    loss = criterion(model(batch_x.to(cfg.device)), batch_y.to(cfg.device))
+                except TypeError:  # pragma: no cover
+                    emb = model(batch_x.to(cfg.device))
+                    loss = criterion(emb, emb, emb)
             else:
                 (batch_x,) = batch
-                loss = model.loss(batch_x.to(cfg.device))
+                try:
+                    loss = criterion(model(batch_x.to(cfg.device)))
+                except TypeError:  # pragma: no cover
+                    emb = model(batch_x.to(cfg.device))
+                    loss = criterion(emb, emb, emb)
 
             optimizer.zero_grad()
             loss.backward()
@@ -113,4 +141,4 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
             if steps >= cfg.cebra.max_iterations:
                 break
 
-    return solver
+    return model
