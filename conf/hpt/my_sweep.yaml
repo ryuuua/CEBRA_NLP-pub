@@ -1,0 +1,17 @@
+# conf/hpt/my_sweep.yaml
+
+# Hydra多重実行の設定
+hydra:
+  sweeper:
+    # 基本的なグリッドサーチを使う
+    _target_: hydra._internal.core_plugins.basic_sweeper.BasicSweeper
+    params:
+      # --- ここに実行したい組み合わせを定義 ---
+
+      # 例1: emotionデータセットとbert/roberta埋め込みの組み合わせ
+      # output_dimを8または16で試す
+      - dataset: dair-ai
+        embedding: bert
+        cebra:
+          output_dim: 8
+

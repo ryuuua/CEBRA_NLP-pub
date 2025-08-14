@@ -1,0 +1,24 @@
+# @package dataset
+name: dair-ai
+hf_path: "dair-ai/emotion"
+text_column: "text"
+label_column: "label"
+
+# Label and visualization settings
+label_map:
+  0: "sadness"
+  1: "joy"
+  2: "love"
+  3: "anger"
+  4: "fear"
+  5: "surprise"
+
+visualization:
+  emotion_order: ['sadness', 'joy', 'love', 'anger', 'fear', 'surprise']
+  emotion_colors:
+    sadness: '#0000FF'
+    joy: '#FFD700'
+    love: '#FF69B4'
+    anger: '#FF0000'
+    fear: '#800080'
+    surprise: '#00FFFF'

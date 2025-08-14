@@ -1,0 +1,16 @@
+# @package cebra
+# A descriptive name for this configuration
+name: cebra7_euc_5dim_lr4
+model_architecture: 'offset1-model-mse'
+# CEBRA-specific parameters
+output_dim: 5
+max_iterations: 10000
+
+# Nested parameters for the model
+params:
+  batch_size: 512
+  learning_rate: 3e-4 # Higher learning rate
+  temperature: 1.0
+  distance: 'euclidean' # Different distance metric
+  conditional: 'discrete'
+  verbose: True

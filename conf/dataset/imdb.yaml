@@ -1,0 +1,17 @@
+# @package dataset
+
+name: imdb
+hf_path: "imdb"
+text_column: "text"
+label_column: "label"
+
+# Label and visualization settings
+label_map:
+  0: "negative"
+  1: "positive"
+
+visualization:
+  emotion_order: ['negative', 'positive']
+  emotion_colors:
+    negative: '#FF0000'
+    positive: '#008000'

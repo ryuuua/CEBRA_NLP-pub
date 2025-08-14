@@ -1,0 +1,61 @@
+dataset:
+  name: dair-ai
+  hf_path: dair-ai/emotion
+  text_column: text
+  label_column: label
+  label_map:
+    0: sadness
+    1: joy
+    2: love
+    3: anger
+    4: fear
+    5: surprise
+  visualization:
+    emotion_order:
+    - sadness
+    - joy
+    - love
+    - anger
+    - fear
+    - surprise
+    emotion_colors:
+      sadness: '#0000FF'
+      joy: '#FFD700'
+      love: '#FF69B4'
+      anger: '#FF0000'
+      fear: '#800080'
+      surprise: '#00FFFF'
+embedding:
+  name: bert-base-uncased
+  type: hf_transformer
+  model_name: bert-base-uncased
+  output_dim: 768
+cebra:
+  name: cebra7dim2
+  model_architecture: offset1-model
+  output_dim: 2
+  max_iterations: 10000
+  conditional: discrete
+  params:
+    batch_size: 512
+    learning_rate: 0.0003
+    temperature: 1.0
+    distance: cosine
+    verbose: true
+consistency_check:
+  enabled: true
+  num_runs: 5
+evaluation:
+  test_size: 0.2
+  random_state: 42
+  knn_neighbors: 5
+mlflow:
+  experiment_name: CEBRA_NLP_Experiment
+  run_name: default_run
+  tracking_uri: http://localhost:5000
+secrets:
+  aws_access_key_id: ${env:AWS_ACCESS_KEY_ID}
+  aws_secret_access_key: ${env:AWS_SECRET_ACCESS_KEY}
+  endpoint_url: ${env:MLFLOW_S3_ENDPOINT_URL, "http://localhost:9000"}
+  region: ${env:AWS_DEFAULT_REGION, "us-east-1"}
+  s3_signature_version: ${env:AWS_S3_SIGNATURE_VERSION, "s3v4"}

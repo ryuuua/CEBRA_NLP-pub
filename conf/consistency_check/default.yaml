@@ -1,0 +1,3 @@
+# conf/consistency_check/default.yaml
+enabled: true
+num_runs: 5

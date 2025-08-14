@@ -1,0 +1,28 @@
+# デフォルトで読み込む設定グループを指定
+defaults:
+  - dataset: dair-ai
+  - embedding: bert
+  - cebra: cebra7dim2
+  - consistency_check: default
+  - _self_
+
+hydra:
+  run:
+
+    dir: results/${dataset.name}/${now:%Y-%m-%d_%H-%M-%S}
+
+evaluation:
+  test_size: 0.2
+  random_state: 42
+  knn_neighbors: 5
+
+mlflow:
+  experiment_name: "CEBRA_NLP_Experiment"
+  run_name: "default_run"
+  tracking_uri: "http://localhost:5000"
+secrets:
+  aws_access_key_id: ${oc.env:AWS_ACCESS_KEY_ID}
+  aws_secret_access_key: ${oc.env:AWS_SECRET_ACCESS_KEY}
+  endpoint_url: ${oc.env:MLFLOW_S3_ENDPOINT_URL, http://localhost:9000}
+  region: ${oc.env:AWS_DEFAULT_REGION, us-east-1}
+  s3_signature_version: ${oc.env:AWS_S3_SIGNATURE_VERSION, s3v4}
