@@ -115,10 +115,7 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
     elif cfg.cebra.conditional != "none":
         raise ValueError("`labels` are required for conditional training")
 
-    try:
-        from cebra.criterions import InfoNCE
-    except Exception:  # pragma: no cover - fallback for older versions
-        from cebra.models import InfoNCE
+    from cebra.models.criterions import FixedCosineInfoNCE
 
     tensors = [torch.as_tensor(X_vectors, dtype=torch.float32)]
     if labels is not None:
@@ -133,11 +130,13 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
 
     model = _build_model(cfg, X_vectors.shape[1])
 
+
     params = inspect.signature(InfoNCE).parameters
     if "offset" in params:
         criterion = InfoNCE(model.get_offset())
     else:
         criterion = InfoNCE()
+
 
     optimizer = torch.optim.Adam(
         model.parameters(),
@@ -149,6 +148,7 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
         for batch in loader:
             if labels is not None:
                 batch_x, batch_y = batch
+
                 embeddings = model(batch_x.to(cfg.device))
                 if embeddings is None:
                     raise ValueError("Model returned no embeddings")
