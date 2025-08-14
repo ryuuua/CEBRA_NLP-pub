@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 from datasets import load_dataset
-from omegaconf import DictConfig
 from src.config_schema import AppConfig # ← この行を追加
 
 def load_and_prepare_dataset(cfg: AppConfig):
