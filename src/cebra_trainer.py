@@ -87,10 +87,7 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
     import torch, cebra
     from torch.utils.data import DataLoader, TensorDataset
 
-    try:
-        from cebra.criterions import InfoNCE
-    except Exception:  # pragma: no cover - fallback for older versions
-        from cebra.models import InfoNCE
+    from cebra.models.criterions import FixedCosineInfoNCE
 
     tensors = [torch.as_tensor(X_vectors, dtype=torch.float32)]
     if labels is not None:
@@ -105,10 +102,9 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
 
     model = _build_model(cfg, X_vectors.shape[1])
 
-    try:
-        criterion = InfoNCE(model.get_offset())
-    except TypeError:  # pragma: no cover - for fallback implementation
-        criterion = InfoNCE()
+    criterion = FixedCosineInfoNCE(
+        temperature=cfg.cebra.params.get("temperature", 1.0)
+    )
 
     optimizer = torch.optim.Adam(
         model.parameters(),
@@ -120,18 +116,26 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
         for batch in loader:
             if labels is not None:
                 batch_x, batch_y = batch
-                try:
-                    loss = criterion(model(batch_x.to(cfg.device)), batch_y.to(cfg.device))
-                except TypeError:  # pragma: no cover
-                    emb = model(batch_x.to(cfg.device))
-                    loss = criterion(emb, emb, emb)
+                ref = model(batch_x.to(cfg.device))
+                batch_y = batch_y.to(cfg.device)
+                pos_indices = []
+                for i, y in enumerate(batch_y):
+                    mask = (batch_y == y).nonzero(as_tuple=False).squeeze()
+                    mask = mask[mask != i]
+                    if len(mask) == 0:
+                        pos_indices.append(i)
+                    else:
+                        j = mask[torch.randint(len(mask), (1,)).item()]
+                        pos_indices.append(j)
+                pos = ref[pos_indices]
+                neg = ref[torch.randperm(ref.shape[0], device=ref.device)]
             else:
                 (batch_x,) = batch
-                try:
-                    loss = criterion(model(batch_x.to(cfg.device)))
-                except TypeError:  # pragma: no cover
-                    emb = model(batch_x.to(cfg.device))
-                    loss = criterion(emb, emb, emb)
+                ref = model(batch_x.to(cfg.device))
+                pos = torch.roll(ref, shifts=-1, dims=0)
+                neg = ref[torch.randperm(ref.shape[0], device=ref.device)]
+
+            loss, *_ = criterion(ref, pos, neg)
 
             optimizer.zero_grad()
             loss.backward()
