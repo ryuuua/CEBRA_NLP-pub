@@ -3,15 +3,18 @@ from pathlib import Path
 from omegaconf import OmegaConf
 from src.config_schema import AppConfig
 
+
 def get_cebra_config_hash(cfg):
     import json, hashlib
+
     relevant_cfg = {
-        'dataset': cfg.dataset.name,
-        'embedding': cfg.embedding.name,
-        'cebra': dict(cfg.cebra)
+        "dataset": cfg.dataset.name,
+        "embedding": cfg.embedding.name,
+        "cebra": dict(cfg.cebra),
     }
     hash_str = json.dumps(relevant_cfg, sort_keys=True)
     return hashlib.md5(hash_str.encode()).hexdigest()[:8]
+
 
 def get_cebra_output_dir(cfg, base="model_outputs"):
     h = get_cebra_config_hash(cfg)
@@ -19,16 +22,20 @@ def get_cebra_output_dir(cfg, base="model_outputs"):
     path.mkdir(parents=True, exist_ok=True)
     return path
 
+
 def save_cebra_model(model, output_dir):
     import torch
+
     path = output_dir / "cebra_model.pt"
     torch.save(model.state_dict(), path)
     return path
+
 
 def save_cebra_embeddings(embeddings, output_dir):
     path = output_dir / "cebra_embeddings.npy"
     np.save(path, embeddings)
     return path
+
 
 def _build_model(cfg: AppConfig, num_neurons: int):
     import cebra
@@ -36,8 +43,12 @@ def _build_model(cfg: AppConfig, num_neurons: int):
     name = getattr(cfg.cebra, "model_architecture", "offset0-model").lower()
     registry = {
         "offset0-model": cebra.models.Offset0Model,
-        "offset5-model": getattr(cebra.models, "Offset5Model", cebra.models.Offset0Model),
-        "offset10-model": getattr(cebra.models, "Offset10Model", cebra.models.Offset0Model),
+        "offset5-model": getattr(
+            cebra.models, "Offset5Model", cebra.models.Offset0Model
+        ),
+        "offset10-model": getattr(
+            cebra.models, "Offset10Model", cebra.models.Offset0Model
+        ),
     }
     ModelClass = registry.get(name)
     if ModelClass is None:
@@ -57,15 +68,15 @@ def load_cebra_model(model_path, cfg: AppConfig, input_dimension: int):
     model.eval()
     return model
 
+
 def transform_cebra(model, X, device):
     import torch
+
     was_training = model.training
     model.eval()
     with torch.no_grad():
         embeddings = (
-            model(torch.as_tensor(X, dtype=torch.float32).to(device))
-            .cpu()
-            .numpy()
+            model(torch.as_tensor(X, dtype=torch.float32).to(device)).cpu().numpy()
         )
     if was_training:
         model.train()
@@ -86,6 +97,23 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
 
     import torch, cebra
     from torch.utils.data import DataLoader, TensorDataset
+    import inspect
+
+    if X_vectors is None:
+        raise ValueError("Embeddings `X_vectors` must not be None")
+    X_vectors = np.asarray(X_vectors)
+    if X_vectors.ndim != 2:
+        raise ValueError(
+            f"`X_vectors` must be 2D (n_samples, n_features), got shape {X_vectors.shape}"
+        )
+    if labels is not None:
+        labels = np.asarray(labels)
+        if labels.shape[0] != X_vectors.shape[0]:
+            raise ValueError(
+                "`labels` must have the same number of samples as `X_vectors`"
+            )
+    elif cfg.cebra.conditional != "none":
+        raise ValueError("`labels` are required for conditional training")
 
     try:
         from cebra.criterions import InfoNCE
@@ -105,9 +133,10 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
 
     model = _build_model(cfg, X_vectors.shape[1])
 
-    try:
+    params = inspect.signature(InfoNCE).parameters
+    if "offset" in params:
         criterion = InfoNCE(model.get_offset())
-    except TypeError:  # pragma: no cover - for fallback implementation
+    else:
         criterion = InfoNCE()
 
     optimizer = torch.optim.Adam(
@@ -120,18 +149,22 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
         for batch in loader:
             if labels is not None:
                 batch_x, batch_y = batch
-                try:
-                    loss = criterion(model(batch_x.to(cfg.device)), batch_y.to(cfg.device))
-                except TypeError:  # pragma: no cover
-                    emb = model(batch_x.to(cfg.device))
-                    loss = criterion(emb, emb, emb)
+                embeddings = model(batch_x.to(cfg.device))
+                if embeddings is None:
+                    raise ValueError("Model returned no embeddings")
+                if batch_y is None:
+                    raise ValueError("Labels are missing for supervised training")
+                if embeddings.shape[0] != batch_y.shape[0]:
+                    raise ValueError(
+                        "Embedding batch size does not match label batch size"
+                    )
+                loss = criterion(embeddings, batch_y.to(cfg.device))
             else:
                 (batch_x,) = batch
-                try:
-                    loss = criterion(model(batch_x.to(cfg.device)))
-                except TypeError:  # pragma: no cover
-                    emb = model(batch_x.to(cfg.device))
-                    loss = criterion(emb, emb, emb)
+                embeddings = model(batch_x.to(cfg.device))
+                if embeddings is None:
+                    raise ValueError("Model returned no embeddings")
+                loss = criterion(embeddings)
 
             optimizer.zero_grad()
             loss.backward()
