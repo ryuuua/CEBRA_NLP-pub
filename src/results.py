@@ -104,13 +104,10 @@ def save_static_2d_plots(embeddings, text_labels, palette, title_prefix, output_
         plt.close()
         print(f"Saved static {name} plot to {static_plot_file}")
 
-def run_knn_classification(train_embeddings, valid_embeddings, y_train, y_valid, 
+def run_knn_classification(train_embeddings, valid_embeddings, y_train, y_valid,
                            label_map, output_dir: Path, knn_neighbors):
     """k-NN classification for discrete labels."""
     print("\nRunning k-NN Classification evaluation...")
-    knn = KNeighborsClassifier(n_neighbors=knn_neighbors, weights='distance')
-    print("\nRunning k-NN evaluation...")
-    
     knn = KNeighborsClassifier(n_neighbors=knn_neighbors, weights='distance')
     knn.fit(train_embeddings, y_train)
     y_pred = knn.predict(valid_embeddings)
