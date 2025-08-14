@@ -1,7 +1,7 @@
 # src/config_schema.py
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Literal
 
 @dataclass
 class VisualizationConfig:
@@ -33,7 +33,11 @@ class CEBRAConfig:
     output_dim: int
     max_iterations: int
     conditional: str 
-    model_architecture: Optional[str] = None
+    model_architecture: Literal[
+        "offset0-model",
+        "offset5-model",
+        "offset10-model",
+    ] = "offset0-model"
     params: Dict[str, Any] = field(default_factory=dict)
 
 @dataclass
@@ -67,4 +71,4 @@ class AppConfig:
     cebra: CEBRAConfig
     evaluation: EvaluationConfig
     mlflow: MLflowConfig
-    consistency_check: ConsistencyCheckConfig 
+    consistency_check: ConsistencyCheckConfig

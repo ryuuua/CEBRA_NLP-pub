@@ -2,7 +2,7 @@
 # A descriptive name for this configuration
 name: model8cosdis
 
-model_architecture: 'supervised1-model' #<-- Add the parameter here
+model_architecture: offset0-model
 
 # CEBRA-specific parameters
 output_dim: 3
