@@ -170,7 +170,7 @@ def main(cfg: AppConfig) -> None:
         # --- 7. Consistency Check ---
         if cfg.consistency_check.enabled:
             print("\n--- Step 7: Running Consistency Check ---")
-            run_consistency_check(X_train, X_valid, cfg, output_dir)
+            run_consistency_check(X_train, labels_for_training, X_valid, cfg, output_dir)
 
         print("\n--- Pipeline Complete ---")
 

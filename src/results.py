@@ -153,15 +153,22 @@ def run_knn_regression(train_embeddings, valid_embeddings, y_train, y_valid,
     
     return mse, r2
 
-def run_consistency_check(X_train, X_valid, cfg: AppConfig, output_dir: Path):
-    
+def run_consistency_check(
+    X_train,
+    y_train,
+    X_valid,
+    cfg: AppConfig,
+    output_dir: Path,
+    y_valid=None,
+):
+
     print("\n--- Step 6: Running Consistency Check ---")
     check_cfg = cfg.consistency_check
     num_runs = check_cfg.num_runs
 
     model_paths = []
     for i in tqdm(range(num_runs), desc="Training models for consistency check"):
-        model = train_cebra(X_train, None, cfg, output_dir)
+        model = train_cebra(X_train, y_train, cfg, output_dir)
         tmp_file = Path(tempfile.gettempdir(), f"cebra_consistency_{i}.pt")
         torch.save(model.state_dict(), tmp_file)
         model_paths.append(tmp_file)
