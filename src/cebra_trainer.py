@@ -115,7 +115,7 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
     elif cfg.cebra.conditional != "none":
         raise ValueError("`labels` are required for conditional training")
 
-    from cebra.models.criterions import FixedCosineInfoNCE
+    from cebra.models.criterions import FixedCosineInfoNCE as InfoNCE
 
     tensors = [torch.as_tensor(X_vectors, dtype=torch.float32)]
     if labels is not None:
