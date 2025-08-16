@@ -158,7 +158,39 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
                     raise ValueError(
                         "Embedding batch size does not match label batch size"
                     )
-                loss = criterion(embeddings, batch_y.to(cfg.device))
+                labels_device = batch_y.to(cfg.device)
+                unique, counts = torch.unique(labels_device, return_counts=True)
+                if unique.numel() < 2 or torch.any(counts < 2):
+                    continue
+
+                pos_embeddings = torch.empty_like(embeddings)
+                neg_embeddings = torch.empty_like(embeddings)
+                for i in range(labels_device.shape[0]):
+                    label = labels_device[i]
+                    same = (labels_device == label).nonzero(as_tuple=False).view(-1)
+                    same = same[same != i]
+                    diff = (labels_device != label).nonzero(as_tuple=False).view(-1)
+                    if same.numel() == 0 or diff.numel() == 0:
+                        break
+                    pos_idx = same[torch.randint(0, same.numel(), (1,))]
+                    neg_idx = diff[torch.randint(0, diff.numel(), (1,))]
+                    pos_embeddings[i] = embeddings[pos_idx]
+                    neg_embeddings[i] = embeddings[neg_idx]
+                else:
+                    loss_tuple = criterion(embeddings, pos_embeddings, neg_embeddings)
+                    loss = loss_tuple[0] if isinstance(loss_tuple, tuple) else loss_tuple
+                    optimizer.zero_grad()
+                    loss.backward()
+                    optimizer.step()
+
+                    steps += 1
+                    if steps >= cfg.cebra.max_iterations:
+                        break
+                    continue
+
+                # Unable to form positive or negative pairs for some samples
+                # in the batch; skip this batch without updating the model.
+                continue
             else:
                 (batch_x,) = batch
                 embeddings = model(batch_x.to(cfg.device))
