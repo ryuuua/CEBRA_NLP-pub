@@ -1,5 +1,5 @@
 import hydra
-import numpy as np 
+import numpy as np
 from omegaconf import OmegaConf
 import torch
 import mlflow
@@ -13,10 +13,12 @@ from src.utils import get_embedding_cache_path, save_text_embedding, load_text_e
 from src.embeddings import get_embeddings
 from src.cebra_trainer import train_cebra, save_cebra_model, transform_cebra
 from sklearn.model_selection import train_test_split
-from src.results import (save_interactive_plot, save_static_2d_plots, 
-                         run_knn_classification, run_knn_regression, 
+from src.results import (save_interactive_plot, save_static_2d_plots,
+                         run_knn_classification, run_knn_regression,
                          run_consistency_check)
 from dotenv import load_dotenv
+import os
+import torch.distributed as dist
 
 # .envファイルから環境変数を読み込む
 load_dotenv()
@@ -24,7 +26,15 @@ load_dotenv()
 @hydra.main(config_path="conf", config_name="config", version_base="1.2")
 def main(cfg: AppConfig) -> None:
     OmegaConf.set_struct(cfg, False)
-    cfg.device = "cuda" if torch.cuda.is_available() else "cpu"
+    local_rank = int(os.environ["LOCAL_RANK"])
+    cfg.ddp.world_size = int(os.environ.get("WORLD_SIZE", 1))
+    cfg.ddp.rank = int(os.environ.get("RANK", 0))
+    cfg.ddp.local_rank = local_rank
+    dist.init_process_group(
+        backend="nccl", rank=cfg.ddp.rank, world_size=cfg.ddp.world_size
+    )
+    cfg.device = f"cuda:{local_rank}"
+    torch.cuda.set_device(local_rank)
     output_dir = Path(HydraConfig.get().run.dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 

@@ -17,6 +17,7 @@ from src.config_schema import (
     MLflowConfig,
     ConsistencyCheckConfig,
     VisualizationConfig,
+    DDPConfig,
 )
 
 def make_config() -> AppConfig:
@@ -40,6 +41,7 @@ def make_config() -> AppConfig:
         evaluation=EvaluationConfig(test_size=0.2, random_state=0, knn_neighbors=1),
         mlflow=MLflowConfig(experiment_name="", run_name=""),
         consistency_check=ConsistencyCheckConfig(enabled=True, num_runs=2),
+        ddp=DDPConfig(world_size=1, rank=0, local_rank=0),
     )
     cfg.device = "cpu"
     return cfg

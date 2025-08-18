@@ -98,7 +98,7 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
     """
 
     import torch, cebra
-    from torch.utils.data import DataLoader, TensorDataset
+    from torch.utils.data import DataLoader, TensorDataset, DistributedSampler
     import inspect
 
     if X_vectors is None:
@@ -124,13 +124,20 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
         dtype = torch.long if cfg.cebra.conditional == "discrete" else torch.float32
         tensors.append(torch.as_tensor(labels, dtype=dtype))
     dataset = TensorDataset(*tensors)
+    sampler = DistributedSampler(
+        dataset, num_replicas=cfg.ddp.world_size, rank=cfg.ddp.rank
+    )
     loader = DataLoader(
         dataset,
         batch_size=cfg.cebra.params.get("batch_size", 512),
-        shuffle=True,
+        sampler=sampler,
     )
 
     model = _build_model(cfg, X_vectors.shape[1])
+    if cfg.ddp.world_size > 1 and torch.distributed.is_initialized():
+        model = torch.nn.parallel.DistributedDataParallel(
+            model, device_ids=[cfg.ddp.local_rank]
+        )
 
 
     params = inspect.signature(InfoNCE).parameters
