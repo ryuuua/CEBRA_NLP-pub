@@ -53,6 +53,12 @@ class MLflowConfig:
     tracking_uri: Optional[str] = None
 
 @dataclass
+class DDPConfig:
+    world_size: int
+    rank: int
+    local_rank: int
+
+@dataclass
 class PathsConfig:
     embedding_cache_dir: str
 
@@ -72,3 +78,4 @@ class AppConfig:
     evaluation: EvaluationConfig
     mlflow: MLflowConfig
     consistency_check: ConsistencyCheckConfig
+    ddp: DDPConfig

@@ -26,3 +26,7 @@ secrets:
   endpoint_url: ${oc.env:MLFLOW_S3_ENDPOINT_URL, http://localhost:9000}
   region: ${oc.env:AWS_DEFAULT_REGION, us-east-1}
   s3_signature_version: ${oc.env:AWS_S3_SIGNATURE_VERSION, s3v4}
+ddp:
+  world_size: 1
+  rank: 0
+  local_rank: 0
