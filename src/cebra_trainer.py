@@ -4,7 +4,7 @@ from omegaconf import OmegaConf
 from src.config_schema import AppConfig
 from tqdm.auto import tqdm
 from collections import deque
-import numpy as np        
+import mlflow
 
 def get_cebra_config_hash(cfg):
     import json, hashlib
@@ -167,6 +167,9 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
                 labels_device = batch_y.to(cfg.device)
                 unique, counts = torch.unique(labels_device, return_counts=True)
                 if unique.numel() < 2 or torch.any(counts < 2):
+                    skipped += 1
+                    if mlflow.active_run():
+                        mlflow.log_metric("skipped_batches", skipped, step=steps)
                     continue
 
                 pos_embeddings = torch.empty_like(embeddings)
@@ -188,6 +191,8 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
                     optimizer.zero_grad()
                     loss.backward()
                     optimizer.step()
+                    if mlflow.active_run():
+                        mlflow.log_metric("loss", loss.item(), step=steps)
 
                     steps += 1
                     if steps >= cfg.cebra.max_iterations:
@@ -196,6 +201,9 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
 
                 # Unable to form positive or negative pairs for some samples
                 # in the batch; skip this batch without updating the model.
+                skipped += 1
+                if mlflow.active_run():
+                    mlflow.log_metric("skipped_batches", skipped, step=steps)
                 continue
             else:
                 (batch_x,) = batch
@@ -207,9 +215,13 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
+            if mlflow.active_run():
+                mlflow.log_metric("loss", loss.item(), step=steps)
 
             steps += 1
             if steps >= cfg.cebra.max_iterations:
                 break
 
+    if mlflow.active_run():
+        mlflow.log_metric("total_skipped", skipped)
     return model
