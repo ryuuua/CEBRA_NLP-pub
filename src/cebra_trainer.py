@@ -2,7 +2,9 @@ import numpy as np
 from pathlib import Path
 from omegaconf import OmegaConf
 from src.config_schema import AppConfig
-
+from tqdm.auto import tqdm
+from collections import deque
+import numpy as np        
 
 def get_cebra_config_hash(cfg):
     import json, hashlib
@@ -144,6 +146,10 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
     )
 
     steps = 0
+    skipped = 0
+    ma = deque(maxlen=50)
+    pbar = tqdm(total=cfg.cebra.max_iterations, desc="CEBRA Training")
+    
     while steps < cfg.cebra.max_iterations:
         for batch in loader:
             if labels is not None:
