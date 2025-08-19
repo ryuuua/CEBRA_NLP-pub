@@ -171,93 +171,94 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
     steps = 0
     skipped = 0
     ma = deque(maxlen=50)
-    pbar = tqdm(total=cfg.cebra.max_iterations, desc="CEBRA Training")
 
-    while steps < cfg.cebra.max_iterations:
-        for batch in loader:
-            if loss_type == "mse":
-                batch_x, batch_y = batch
-                embeddings = model(batch_x.to(cfg.device, non_blocking=True))
-                loss = criterion(
-                    embeddings, batch_y.to(cfg.device, non_blocking=True)
-                )
-            else:
-                if labels is None:
-                    (batch_x,) = batch
-                    embeddings = model(batch_x.to(cfg.device, non_blocking=True))
-                    if embeddings is None:
-                        raise ValueError("Model returned no embeddings")
-                    loss = criterion(embeddings)
-                else:
+    with tqdm(total=cfg.cebra.max_iterations, desc="CEBRA Training") as pbar:
+        while steps < cfg.cebra.max_iterations:
+            for batch in loader:
+                if loss_type == "mse":
                     batch_x, batch_y = batch
                     embeddings = model(batch_x.to(cfg.device, non_blocking=True))
-                    if embeddings is None:
-                        raise ValueError("Model returned no embeddings")
-                    if batch_y is None:
-                        raise ValueError("Labels are missing for supervised training")
-                    if embeddings.shape[0] != batch_y.shape[0]:
-                        raise ValueError(
-                            "Embedding batch size does not match label batch size"
+                    loss = criterion(
+                        embeddings, batch_y.to(cfg.device, non_blocking=True)
+                    )
+                else:
+                    if labels is None:
+                        (batch_x,) = batch
+                        embeddings = model(batch_x.to(cfg.device, non_blocking=True))
+                        if embeddings is None:
+                            raise ValueError("Model returned no embeddings")
+                        loss = criterion(embeddings)
+                    else:
+                        batch_x, batch_y = batch
+                        embeddings = model(batch_x.to(cfg.device, non_blocking=True))
+                        if embeddings is None:
+                            raise ValueError("Model returned no embeddings")
+                        if batch_y is None:
+                            raise ValueError("Labels are missing for supervised training")
+                        if embeddings.shape[0] != batch_y.shape[0]:
+                            raise ValueError(
+                                "Embedding batch size does not match label batch size"
+                            )
+                        labels_device = batch_y.to(cfg.device, non_blocking=True)
+                        unique, counts = torch.unique(labels_device, return_counts=True)
+                        if unique.numel() < 2 or torch.any(counts < 2):
+                            skipped += 1
+                            if mlflow.active_run():
+                                mlflow.log_metric("skipped_batches", skipped, step=steps)
+                            continue
+    
+                        batch_size = labels_device.shape[0]
+                        # Precompute label-wise masks to avoid per-sample loops
+                        same_mask = labels_device.unsqueeze(0) == labels_device.unsqueeze(1)
+                        same_mask.fill_diagonal_(False)
+                        diff_mask = ~same_mask
+                        diff_mask.fill_diagonal_(False)
+    
+                        # Random choices for positive/negative samples
+                        rand_pos = torch.rand(batch_size, device=labels_device.device)
+                        rand_neg = torch.rand(batch_size, device=labels_device.device)
+    
+                        same_counts = same_mask.sum(dim=1)
+                        diff_counts = diff_mask.sum(dim=1)
+                        if torch.any(same_counts == 0) or torch.any(diff_counts == 0):
+                            skipped += 1
+                            if mlflow.active_run():
+                                mlflow.log_metric("skipped_batches", skipped, step=steps)
+                            continue
+                        pos_choice = (rand_pos * same_counts).floor().long()
+                        neg_choice = (rand_neg * diff_counts).floor().long()
+    
+                        same_cumsum = same_mask.cumsum(dim=1) - 1
+                        diff_cumsum = diff_mask.cumsum(dim=1) - 1
+                        same_cumsum[~same_mask] = -1
+                        diff_cumsum[~diff_mask] = -1
+    
+                        pos_indices = (
+                            (same_cumsum == pos_choice.unsqueeze(1)).float().argmax(dim=1)
                         )
-                    labels_device = batch_y.to(cfg.device, non_blocking=True)
-                    unique, counts = torch.unique(labels_device, return_counts=True)
-                    if unique.numel() < 2 or torch.any(counts < 2):
-                        skipped += 1
-                        if mlflow.active_run():
-                            mlflow.log_metric("skipped_batches", skipped, step=steps)
-                        continue
-
-                    batch_size = labels_device.shape[0]
-                    # Precompute label-wise masks to avoid per-sample loops
-                    same_mask = labels_device.unsqueeze(0) == labels_device.unsqueeze(1)
-                    same_mask.fill_diagonal_(False)
-                    diff_mask = ~same_mask
-                    diff_mask.fill_diagonal_(False)
-
-                    # Random choices for positive/negative samples
-                    rand_pos = torch.rand(batch_size, device=labels_device.device)
-                    rand_neg = torch.rand(batch_size, device=labels_device.device)
-
-                    same_counts = same_mask.sum(dim=1)
-                    diff_counts = diff_mask.sum(dim=1)
-                    if torch.any(same_counts == 0) or torch.any(diff_counts == 0):
-                        skipped += 1
-                        if mlflow.active_run():
-                            mlflow.log_metric("skipped_batches", skipped, step=steps)
-                        continue
-                    pos_choice = (rand_pos * same_counts).floor().long()
-                    neg_choice = (rand_neg * diff_counts).floor().long()
-
-                    same_cumsum = same_mask.cumsum(dim=1) - 1
-                    diff_cumsum = diff_mask.cumsum(dim=1) - 1
-                    same_cumsum[~same_mask] = -1
-                    diff_cumsum[~diff_mask] = -1
-
-                    pos_indices = (
-                        (same_cumsum == pos_choice.unsqueeze(1)).float().argmax(dim=1)
-                    )
-                    neg_indices = (
-                        (diff_cumsum == neg_choice.unsqueeze(1)).float().argmax(dim=1)
-                    )
-
-                    pos_embeddings = embeddings[pos_indices]
-                    neg_embeddings = embeddings[neg_indices]
-                    loss_tuple = criterion(embeddings, pos_embeddings, neg_embeddings)
-                    loss = (
-                        loss_tuple[0]
-                        if isinstance(loss_tuple, tuple)
-                        else loss_tuple
-                    )
-
-            optimizer.zero_grad()
-            loss.backward()
-            optimizer.step()
-            if mlflow.active_run():
-                mlflow.log_metric("loss", loss.item(), step=steps)
-
-            steps += 1
-            if steps >= cfg.cebra.max_iterations:
-                break
+                        neg_indices = (
+                            (diff_cumsum == neg_choice.unsqueeze(1)).float().argmax(dim=1)
+                        )
+    
+                        pos_embeddings = embeddings[pos_indices]
+                        neg_embeddings = embeddings[neg_indices]
+                        loss_tuple = criterion(embeddings, pos_embeddings, neg_embeddings)
+                        loss = (
+                            loss_tuple[0]
+                            if isinstance(loss_tuple, tuple)
+                            else loss_tuple
+                        )
+    
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+                if mlflow.active_run():
+                        mlflow.log_metric("loss", loss.item(), step=steps)
+    
+                steps += 1
+                pbar.update(1)
+                if steps >= cfg.cebra.max_iterations:
+                    break
 
     if mlflow.active_run():
         mlflow.log_metric("total_skipped", skipped)
