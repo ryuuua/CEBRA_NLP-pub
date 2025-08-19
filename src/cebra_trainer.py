@@ -40,9 +40,10 @@ def save_cebra_embeddings(embeddings, output_dir):
 
 
 def _build_model(cfg: AppConfig, num_neurons: int):
-    import cebra
+    import cebra, re
 
     name = getattr(cfg.cebra, "model_architecture", "offset0-model").lower()
+
     registry = {
         "offset0-model": cebra.models.Offset0Model,
         "offset5-model": getattr(
@@ -52,9 +53,17 @@ def _build_model(cfg: AppConfig, num_neurons: int):
             cebra.models, "Offset10Model", cebra.models.Offset0Model
         ),
     }
+
     ModelClass = registry.get(name)
     if ModelClass is None:
+        # Attempt to dynamically resolve the model class from its name
+        parts = [p for p in re.split(r"[-_]", name) if p]
+        class_name = "".join(part.capitalize() for part in parts)
+        ModelClass = getattr(cebra.models, class_name, None)
+
+    if ModelClass is None:
         raise ValueError(f"Unsupported model_architecture: {name}")
+
     return ModelClass(
         num_neurons=num_neurons,
         num_units=cfg.cebra.params.get("num_units", 512),
@@ -101,6 +110,8 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
     from torch.utils.data import DataLoader, TensorDataset, DistributedSampler
     import inspect
 
+    loss_type = cfg.cebra.params.get("loss", "infonce").lower()
+
     if X_vectors is None:
         raise ValueError("Embeddings `X_vectors` must not be None")
     X_vectors = np.asarray(X_vectors)
@@ -114,8 +125,8 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
             raise ValueError(
                 "`labels` must have the same number of samples as `X_vectors`"
             )
-    elif cfg.cebra.conditional != "none":
-        raise ValueError("`labels` are required for conditional training")
+    elif loss_type == "mse" or cfg.cebra.conditional != "none":
+        raise ValueError("`labels` are required for the selected training configuration")
 
     from cebra.models.criterions import FixedCosineInfoNCE as InfoNCE
 
@@ -139,13 +150,14 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
             model, device_ids=[cfg.ddp.local_rank]
         )
 
-
-    params = inspect.signature(InfoNCE).parameters
-    if "offset" in params:
-        criterion = InfoNCE(model.get_offset())
+    if loss_type == "mse":
+        criterion = torch.nn.MSELoss()
     else:
-        criterion = InfoNCE()
-
+        params = inspect.signature(InfoNCE).parameters
+        if "offset" in params:
+            criterion = InfoNCE(model.get_offset())
+        else:
+            criterion = InfoNCE()
 
     optimizer = torch.optim.Adam(
         model.parameters(),
@@ -156,68 +168,65 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
     skipped = 0
     ma = deque(maxlen=50)
     pbar = tqdm(total=cfg.cebra.max_iterations, desc="CEBRA Training")
-    
+
     while steps < cfg.cebra.max_iterations:
         for batch in loader:
-            if labels is not None:
+            if loss_type == "mse":
                 batch_x, batch_y = batch
-
                 embeddings = model(batch_x.to(cfg.device))
-                if embeddings is None:
-                    raise ValueError("Model returned no embeddings")
-                if batch_y is None:
-                    raise ValueError("Labels are missing for supervised training")
-                if embeddings.shape[0] != batch_y.shape[0]:
-                    raise ValueError(
-                        "Embedding batch size does not match label batch size"
-                    )
-                labels_device = batch_y.to(cfg.device)
-                unique, counts = torch.unique(labels_device, return_counts=True)
-                if unique.numel() < 2 or torch.any(counts < 2):
-                    skipped += 1
-                    if mlflow.active_run():
-                        mlflow.log_metric("skipped_batches", skipped, step=steps)
-                    continue
-
-                pos_embeddings = torch.empty_like(embeddings)
-                neg_embeddings = torch.empty_like(embeddings)
-                for i in range(labels_device.shape[0]):
-                    label = labels_device[i]
-                    same = (labels_device == label).nonzero(as_tuple=False).view(-1)
-                    same = same[same != i]
-                    diff = (labels_device != label).nonzero(as_tuple=False).view(-1)
-                    if same.numel() == 0 or diff.numel() == 0:
-                        break
-                    pos_idx = same[torch.randint(0, same.numel(), (1,))]
-                    neg_idx = diff[torch.randint(0, diff.numel(), (1,))]
-                    pos_embeddings[i] = embeddings[pos_idx]
-                    neg_embeddings[i] = embeddings[neg_idx]
-                else:
-                    loss_tuple = criterion(embeddings, pos_embeddings, neg_embeddings)
-                    loss = loss_tuple[0] if isinstance(loss_tuple, tuple) else loss_tuple
-                    optimizer.zero_grad()
-                    loss.backward()
-                    optimizer.step()
-                    if mlflow.active_run():
-                        mlflow.log_metric("loss", loss.item(), step=steps)
-
-                    steps += 1
-                    if steps >= cfg.cebra.max_iterations:
-                        break
-                    continue
-
-                # Unable to form positive or negative pairs for some samples
-                # in the batch; skip this batch without updating the model.
-                skipped += 1
-                if mlflow.active_run():
-                    mlflow.log_metric("skipped_batches", skipped, step=steps)
-                continue
+                loss = criterion(embeddings, batch_y.to(cfg.device))
             else:
-                (batch_x,) = batch
-                embeddings = model(batch_x.to(cfg.device))
-                if embeddings is None:
-                    raise ValueError("Model returned no embeddings")
-                loss = criterion(embeddings)
+                if labels is None:
+                    (batch_x,) = batch
+                    embeddings = model(batch_x.to(cfg.device))
+                    if embeddings is None:
+                        raise ValueError("Model returned no embeddings")
+                    loss = criterion(embeddings)
+                else:
+                    batch_x, batch_y = batch
+                    embeddings = model(batch_x.to(cfg.device))
+                    if embeddings is None:
+                        raise ValueError("Model returned no embeddings")
+                    if batch_y is None:
+                        raise ValueError("Labels are missing for supervised training")
+                    if embeddings.shape[0] != batch_y.shape[0]:
+                        raise ValueError(
+                            "Embedding batch size does not match label batch size"
+                        )
+                    labels_device = batch_y.to(cfg.device)
+                    unique, counts = torch.unique(labels_device, return_counts=True)
+                    if unique.numel() < 2 or torch.any(counts < 2):
+                        skipped += 1
+                        if mlflow.active_run():
+                            mlflow.log_metric("skipped_batches", skipped, step=steps)
+                        continue
+
+                    pos_embeddings = torch.empty_like(embeddings)
+                    neg_embeddings = torch.empty_like(embeddings)
+                    valid = True
+                    for i in range(labels_device.shape[0]):
+                        label = labels_device[i]
+                        same = (labels_device == label).nonzero(as_tuple=False).view(-1)
+                        same = same[same != i]
+                        diff = (labels_device != label).nonzero(as_tuple=False).view(-1)
+                        if same.numel() == 0 or diff.numel() == 0:
+                            valid = False
+                            break
+                        pos_idx = same[torch.randint(0, same.numel(), (1,))]
+                        neg_idx = diff[torch.randint(0, diff.numel(), (1,))]
+                        pos_embeddings[i] = embeddings[pos_idx]
+                        neg_embeddings[i] = embeddings[neg_idx]
+                    if not valid:
+                        skipped += 1
+                        if mlflow.active_run():
+                            mlflow.log_metric("skipped_batches", skipped, step=steps)
+                        continue
+                    loss_tuple = criterion(embeddings, pos_embeddings, neg_embeddings)
+                    loss = (
+                        loss_tuple[0]
+                        if isinstance(loss_tuple, tuple)
+                        else loss_tuple
+                    )
 
             optimizer.zero_grad()
             loss.backward()
