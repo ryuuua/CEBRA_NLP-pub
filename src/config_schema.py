@@ -36,6 +36,10 @@ class CEBRAConfig:
     # Allow arbitrary model names so new architectures can be specified
     model_architecture: str = "offset0-model"
     params: Dict[str, Any] = field(default_factory=dict)
+    num_workers: int = 0
+    pin_memory: bool = True
+    persistent_workers: bool = True
+    prefetch_factor: int = 2
 
 @dataclass
 class EvaluationConfig:

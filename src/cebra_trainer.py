@@ -142,6 +142,10 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
         dataset,
         batch_size=cfg.cebra.params.get("batch_size", 512),
         sampler=sampler,
+        num_workers=cfg.cebra.num_workers,
+        pin_memory=cfg.cebra.pin_memory,
+        persistent_workers=cfg.cebra.persistent_workers if cfg.cebra.num_workers > 0 else False,
+        prefetch_factor=cfg.cebra.prefetch_factor if cfg.cebra.num_workers > 0 else None,
     )
 
     model = _build_model(cfg, X_vectors.shape[1])
@@ -173,18 +177,20 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
         for batch in loader:
             if loss_type == "mse":
                 batch_x, batch_y = batch
-                embeddings = model(batch_x.to(cfg.device))
-                loss = criterion(embeddings, batch_y.to(cfg.device))
+                embeddings = model(batch_x.to(cfg.device, non_blocking=True))
+                loss = criterion(
+                    embeddings, batch_y.to(cfg.device, non_blocking=True)
+                )
             else:
                 if labels is None:
                     (batch_x,) = batch
-                    embeddings = model(batch_x.to(cfg.device))
+                    embeddings = model(batch_x.to(cfg.device, non_blocking=True))
                     if embeddings is None:
                         raise ValueError("Model returned no embeddings")
                     loss = criterion(embeddings)
                 else:
                     batch_x, batch_y = batch
-                    embeddings = model(batch_x.to(cfg.device))
+                    embeddings = model(batch_x.to(cfg.device, non_blocking=True))
                     if embeddings is None:
                         raise ValueError("Model returned no embeddings")
                     if batch_y is None:
@@ -193,7 +199,7 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
                         raise ValueError(
                             "Embedding batch size does not match label batch size"
                         )
-                    labels_device = batch_y.to(cfg.device)
+                    labels_device = batch_y.to(cfg.device, non_blocking=True)
                     unique, counts = torch.unique(labels_device, return_counts=True)
                     if unique.numel() < 2 or torch.any(counts < 2):
                         skipped += 1
