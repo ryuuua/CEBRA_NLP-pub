@@ -201,26 +201,41 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
                             mlflow.log_metric("skipped_batches", skipped, step=steps)
                         continue
 
-                    pos_embeddings = torch.empty_like(embeddings)
-                    neg_embeddings = torch.empty_like(embeddings)
-                    valid = True
-                    for i in range(labels_device.shape[0]):
-                        label = labels_device[i]
-                        same = (labels_device == label).nonzero(as_tuple=False).view(-1)
-                        same = same[same != i]
-                        diff = (labels_device != label).nonzero(as_tuple=False).view(-1)
-                        if same.numel() == 0 or diff.numel() == 0:
-                            valid = False
-                            break
-                        pos_idx = same[torch.randint(0, same.numel(), (1,))]
-                        neg_idx = diff[torch.randint(0, diff.numel(), (1,))]
-                        pos_embeddings[i] = embeddings[pos_idx]
-                        neg_embeddings[i] = embeddings[neg_idx]
-                    if not valid:
+                    batch_size = labels_device.shape[0]
+                    # Precompute label-wise masks to avoid per-sample loops
+                    same_mask = labels_device.unsqueeze(0) == labels_device.unsqueeze(1)
+                    same_mask.fill_diagonal_(False)
+                    diff_mask = ~same_mask
+                    diff_mask.fill_diagonal_(False)
+
+                    # Random choices for positive/negative samples
+                    rand_pos = torch.rand(batch_size, device=labels_device.device)
+                    rand_neg = torch.rand(batch_size, device=labels_device.device)
+
+                    same_counts = same_mask.sum(dim=1)
+                    diff_counts = diff_mask.sum(dim=1)
+                    if torch.any(same_counts == 0) or torch.any(diff_counts == 0):
                         skipped += 1
                         if mlflow.active_run():
                             mlflow.log_metric("skipped_batches", skipped, step=steps)
                         continue
+                    pos_choice = (rand_pos * same_counts).floor().long()
+                    neg_choice = (rand_neg * diff_counts).floor().long()
+
+                    same_cumsum = same_mask.cumsum(dim=1) - 1
+                    diff_cumsum = diff_mask.cumsum(dim=1) - 1
+                    same_cumsum[~same_mask] = -1
+                    diff_cumsum[~diff_mask] = -1
+
+                    pos_indices = (
+                        (same_cumsum == pos_choice.unsqueeze(1)).float().argmax(dim=1)
+                    )
+                    neg_indices = (
+                        (diff_cumsum == neg_choice.unsqueeze(1)).float().argmax(dim=1)
+                    )
+
+                    pos_embeddings = embeddings[pos_indices]
+                    neg_embeddings = embeddings[neg_indices]
                     loss_tuple = criterion(embeddings, pos_embeddings, neg_embeddings)
                     loss = (
                         loss_tuple[0]
