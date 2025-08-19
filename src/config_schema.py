@@ -32,12 +32,9 @@ class EmbeddingConfig:
 class CEBRAConfig:
     output_dim: int
     max_iterations: int
-    conditional: str 
-    model_architecture: Literal[
-        "offset0-model",
-        "offset5-model",
-        "offset10-model",
-    ] = "offset0-model"
+    conditional: str
+    # Allow arbitrary model names so new architectures can be specified
+    model_architecture: str = "offset0-model"
     params: Dict[str, Any] = field(default_factory=dict)
 
 @dataclass

@@ -19,7 +19,7 @@ from src.config_schema import (
 )
 
 
-def make_config(batch_size: int) -> AppConfig:
+def make_config(batch_size: int, loss: str = "infonce") -> AppConfig:
     cfg = AppConfig(
         paths=PathsConfig(embedding_cache_dir=""),
         dataset=DatasetConfig(
@@ -34,8 +34,8 @@ def make_config(batch_size: int) -> AppConfig:
         cebra=CEBRAConfig(
             output_dim=2,
             max_iterations=1,
-            conditional="discrete",
-            params={"batch_size": batch_size},
+            conditional="none" if loss == "mse" else "discrete",
+            params={"batch_size": batch_size, "loss": loss},
         ),
         evaluation=EvaluationConfig(test_size=0.2, random_state=0, knn_neighbors=1),
         mlflow=MLflowConfig(experiment_name="", run_name=""),
@@ -54,3 +54,10 @@ def test_train_one_step_no_type_error():
         train_cebra(X, y, cfg, Path("."))
     except TypeError as exc:  # pragma: no cover - ensure failure message
         assert False, f"TypeError raised: {exc}"
+
+
+def test_train_mse_loss():
+    cfg = make_config(batch_size=4, loss="mse")
+    X = np.random.rand(4, 5).astype(np.float32)
+    y = np.random.rand(4, cfg.cebra.output_dim).astype(np.float32)
+    train_cebra(X, y, cfg, Path("."))
