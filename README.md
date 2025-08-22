@@ -10,6 +10,12 @@
 python main.py
 ```
 
+Mac (CPU/MPS) での実行:
+
+```bash
+python macmain.py
+```
+
 分散学習 (2 GPU) での実行例:
 
 ```bash
