@@ -21,6 +21,7 @@ from cebra import plot_consistency
 from sklearn.neighbors import KNeighborsRegressor
 from sklearn.metrics import mean_squared_error, r2_score
 import torch
+import gc
 from .cebra_trainer import train_cebra, transform_cebra, load_cebra_model
 # train_test_splitはこのファイルで使われていないため削除
 
@@ -166,12 +167,20 @@ def run_consistency_check(
     check_cfg = cfg.consistency_check
     num_runs = check_cfg.num_runs
 
+    # Disable persistent DataLoader workers to prevent accumulation across runs
+    original_persistent = cfg.cebra.persistent_workers
+    cfg.cebra.persistent_workers = False
+
     model_paths = []
     for i in tqdm(range(num_runs), desc="Training models for consistency check"):
         model = train_cebra(X_train, y_train, cfg, output_dir)
         tmp_file = Path(tempfile.gettempdir(), f"cebra_consistency_{i}.pt")
         torch.save(model.state_dict(), tmp_file)
         model_paths.append(tmp_file)
+        # Release resources from this training run
+        del model
+        gc.collect()
+        torch.cuda.empty_cache()
 
     train_embeddings = []
     valid_embeddings = []
@@ -180,6 +189,9 @@ def run_consistency_check(
         train_embeddings.append(transform_cebra(loaded_model, X_train, cfg.device))
         valid_embeddings.append(transform_cebra(loaded_model, X_valid, cfg.device))
         tmp_file.unlink()
+        del loaded_model
+        gc.collect()
+        torch.cuda.empty_cache()
 
     for name, embeddings in [("train", train_embeddings), ("valid", valid_embeddings)]:
         print(f"\nComputing consistency for {name} data...")
@@ -199,3 +211,5 @@ def run_consistency_check(
         plt.close(ax.figure)
         mlflow.log_artifact(str(plot_path), "plots")
 
+    # Restore original persistent_workers setting
+    cfg.cebra.persistent_workers = original_persistent

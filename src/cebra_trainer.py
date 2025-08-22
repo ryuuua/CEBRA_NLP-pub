@@ -262,4 +262,13 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
 
     if mlflow.active_run():
         mlflow.log_metric("total_skipped", skipped)
+
+    # Explicitly shut down DataLoader workers to avoid process accumulation
+    if cfg.cebra.num_workers > 0:
+        iterator = getattr(loader, "_iterator", None)
+        if iterator is not None:
+            iterator._shutdown_workers()
+        del loader
+        import gc
+        gc.collect()
     return model
