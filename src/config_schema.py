@@ -34,7 +34,7 @@ class CEBRAConfig:
     max_iterations: int
     conditional: str
     # Allow arbitrary model names so new architectures can be specified
-    model_architecture: str = "offset0-model"
+    model_architecture: str = "offset1-model"
     params: Dict[str, Any] = field(default_factory=dict)
     num_workers: int = 0
     pin_memory: bool = True
