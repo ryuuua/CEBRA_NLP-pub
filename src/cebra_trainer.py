@@ -68,9 +68,6 @@ def normalize_model_architecture(name: str) -> str:
         "offset1-model": default_model,
         "offset5-model": getattr(cebra.models, "Offset5Model", default_model),
         "offset10-model": getattr(cebra.models, "Offset10Model", default_model),
-        "offset10-model-mse": getattr(
-            cebra.models, "Offset10ModelMSE", default_model
-        ),
         "offset36-model": getattr(cebra.models, "Offset36", default_model),
         "offset36-dropout": getattr(
             cebra.models, "Offset36Dropout", default_model
@@ -92,7 +89,10 @@ def normalize_model_architecture(name: str) -> str:
     ModelClass = registry.get(normalized)
     if ModelClass is None:
         parts = [p for p in re.split(r"[-_]", normalized) if p]
-        class_name = "".join(part.capitalize() for part in parts)
+        acronyms = {"mse"}
+        class_name = "".join(
+            part.upper() if part in acronyms else part.capitalize() for part in parts
+        )
         ModelClass = getattr(cebra.models, class_name, None)
 
     if ModelClass is None:

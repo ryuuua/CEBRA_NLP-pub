@@ -6,7 +6,7 @@ import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from src.cebra_trainer import train_cebra
+from src.cebra_trainer import train_cebra, normalize_model_architecture
 from src.config_schema import (
     AppConfig,
     PathsConfig,
@@ -48,6 +48,32 @@ def make_config(batch_size: int, loss: str = "infonce") -> AppConfig:
     )
     cfg.device = "cpu"
     return cfg
+
+
+def test_normalize_model_architecture_acronym(monkeypatch):
+    import cebra
+
+    # Provide a model class matching the expected acronym expansion.
+    monkeypatch.setattr(
+        cebra.models, "Offset1ModelMSE", cebra.models.Offset0Model, raising=False
+    )
+
+    registered = {}
+
+    def fake_register(name, override=True, deprecated=True):
+        def decorator(cls):
+            registered[name] = cls
+            return cls
+
+        return decorator
+
+    monkeypatch.setattr(cebra.models, "register", fake_register)
+    monkeypatch.setattr(cebra.models, "get_options", lambda: [])
+
+    normalized = normalize_model_architecture("offset1-model-mse")
+
+    assert normalized == "offset1-model-mse"
+    assert registered["offset1-model-mse"] is cebra.models.Offset0Model
 
 
 def test_train_one_step_no_type_error():
