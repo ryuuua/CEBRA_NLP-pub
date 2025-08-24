@@ -212,6 +212,7 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
         else:
             num_classes = labels.shape[1]
         model.set_output_num(num_classes)
+        model = model.to(cfg.device)
 
     if cfg.ddp.world_size > 1 and torch.distributed.is_initialized():
         model = torch.nn.parallel.DistributedDataParallel(
