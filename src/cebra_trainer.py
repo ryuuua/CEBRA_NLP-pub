@@ -192,7 +192,8 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
         batch_size=cfg.cebra.params.get("batch_size", 512),
         sampler=sampler,
         num_workers=cfg.cebra.num_workers,
-        pin_memory=cfg.cebra.pin_memory,
+        # Use pinned memory only when running on CUDA to avoid warnings on MPS
+        pin_memory=cfg.cebra.pin_memory and cfg.device.startswith("cuda"),
         persistent_workers=cfg.cebra.persistent_workers if cfg.cebra.num_workers > 0 else False,
         prefetch_factor=cfg.cebra.prefetch_factor if cfg.cebra.num_workers > 0 else None,
     )
