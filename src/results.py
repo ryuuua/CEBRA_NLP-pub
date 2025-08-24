@@ -27,6 +27,12 @@ from .cebra_trainer import normalize_model_architecture
 # train_test_splitはこのファイルで使われていないため削除
 
 
+def clear_cuda_cache() -> None:
+    """Clear the CUDA cache if running on a GPU."""
+    if torch.cuda.is_available():
+        torch.cuda.empty_cache()
+
+
 def save_interactive_plot(embeddings, text_labels, output_dim, palette, title, output_path: Path):
     """Saves a 2D or 3D interactive plot as an HTML file and a static SVG image."""
     print(f"\nGenerating interactive visualization for {output_dim}-dimensional output...")
@@ -194,7 +200,7 @@ def run_consistency_check(
         model_paths.append(tmp_file)
         del model
         gc.collect()
-        torch.cuda.empty_cache()
+        clear_cuda_cache()
 
     train_embeddings = []
     valid_embeddings = []
@@ -205,7 +211,7 @@ def run_consistency_check(
         tmp_file.unlink()
         del loaded_model
         gc.collect()
-        torch.cuda.empty_cache()
+        clear_cuda_cache()
 
     train_mean = valid_mean = None
     for name, embeddings in [("train", train_embeddings), ("valid", valid_embeddings)]:
