@@ -2,6 +2,7 @@ import numpy as np
 from pathlib import Path
 import sys
 import torch
+import pytest
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
@@ -64,6 +65,37 @@ def test_train_mse_loss():
     X = np.random.rand(4, 5).astype(np.float32)
     y = np.random.rand(4, cfg.cebra.output_dim).astype(np.float32)
     train_cebra(X, y, cfg, Path("."))
+
+
+def test_classifier_model_tuple_output(monkeypatch):
+    cfg = make_config(batch_size=2, loss="mse")
+    X = np.random.rand(2, 3).astype(np.float32)
+    y = np.random.rand(2, cfg.cebra.output_dim).astype(np.float32)
+
+    class DummyModel(torch.nn.Module):
+        def __init__(self, in_dim):
+            super().__init__()
+            self.linear = torch.nn.Linear(in_dim, cfg.cebra.output_dim)
+            self.classifier = None
+
+        def set_output_num(self, n):
+            self.classifier = torch.nn.Linear(cfg.cebra.output_dim, n)
+
+        def forward(self, x):
+            emb = self.linear(x)
+            pred = self.classifier(emb) if self.classifier is not None else None
+            return emb, pred
+
+    def dummy_build_model(cfg_, num_neurons):
+        return DummyModel(num_neurons)
+
+    monkeypatch.setattr("src.cebra_trainer._build_model", dummy_build_model)
+
+    model = train_cebra(X, y, cfg, Path("."))
+    assert getattr(model, "classifier") is not None
+
+    with pytest.raises(ValueError):
+        train_cebra(X, None, cfg, Path("."))
 
 
 def _vectorized_sample(labels, rand_pos, rand_neg):
