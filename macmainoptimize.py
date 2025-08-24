@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 import os
 from cebra.integrations.sklearn.metrics import goodness_of_fit_score
 import cebra
+from src.cebra_trainer import normalize_model_architecture
 
 load_dotenv()
 
@@ -106,9 +107,7 @@ def main(cfg: AppConfig) -> None:
 
                     # Train CEBRA model
                     print("\n--- Step 4: Training CEBRA model ---")
-                    arch = cfg.cebra.model_architecture
-                    if arch == "offset0-model":
-                        arch = "offset1-model"
+                    arch = normalize_model_architecture(cfg.cebra.model_architecture)
                     cebra_model = cebra.CEBRA(
                         model_architecture=arch,
                         output_dimension=dim,
