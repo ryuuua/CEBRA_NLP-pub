@@ -10,10 +10,12 @@
 python main.py
 ```
 
-Mac (CPU/MPS) での実行:
+Mac (CUDA/MPS/CPU) での実行 (自動デバイス検出):
 
 ```bash
 python macmain.py
+# or
+python macmainoptimize.py
 ```
 
 分散学習 (2 GPU) での実行例:

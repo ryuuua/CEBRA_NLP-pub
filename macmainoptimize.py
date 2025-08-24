@@ -32,7 +32,13 @@ def main(cfg: AppConfig) -> None:
     cfg.ddp.world_size = 1
     cfg.ddp.rank = 0
     cfg.ddp.local_rank = 0
-    cfg.device = "mps" if torch.backends.mps.is_available() else "cpu"
+    # Select the best available device
+    if torch.cuda.is_available():
+        cfg.device = "cuda"
+    elif torch.backends.mps.is_available():
+        cfg.device = "mps"
+    else:
+        cfg.device = "cpu"
     output_dir = Path(HydraConfig.get().run.dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
