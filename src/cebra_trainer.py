@@ -61,29 +61,16 @@ def normalize_model_architecture(name: str) -> str:
 
     normalized = name.lower()
 
+    default_model = getattr(cebra.models, "Offset1Model", cebra.models.Offset0Model)
 
     registry = {
-
         "offset0-model": cebra.models.Offset0Model,
-        "offset1-model": getattr(
-            cebra.models, "Offset1Model", cebra.models.Offset0Model
-        ),
-        "offset5-model": getattr(
-            cebra.models, "Offset5Model", cebra.models.Offset0Model
-
-        ),
+        "offset1-model": default_model,
         "offset5-model": getattr(cebra.models, "Offset5Model", default_model),
         "offset10-model": getattr(cebra.models, "Offset10Model", default_model),
         "offset10-model-mse": getattr(
             cebra.models, "Offset10ModelMSE", default_model
         ),
-        "offset0-model-mse": getattr(
-            cebra.models, "Offset0ModelMSE", default_model
-        ),
-        "offset0-model-v2": getattr(cebra.models, "Offset0ModelV2", default_model),
-        "offset0-model-v3": getattr(cebra.models, "Offset0ModelV3", default_model),
-        "offset0-model-v4": getattr(cebra.models, "Offset0ModelV4", default_model),
-        "offset0-model-v5": getattr(cebra.models, "Offset0ModelV5", default_model),
         "offset36-model": getattr(cebra.models, "Offset36", default_model),
         "offset36-dropout": getattr(
             cebra.models, "Offset36Dropout", default_model
