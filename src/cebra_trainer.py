@@ -39,10 +39,27 @@ def save_cebra_embeddings(embeddings, output_dir):
     return path
 
 
-def _build_model(cfg: AppConfig, num_neurons: int):
+def normalize_model_architecture(name: str) -> str:
+    """Normalize and register a model architecture name.
+
+    This ensures that custom architectures such as ``offset0-model`` are
+    registered with ``cebra``'s model registry so they can be referenced by
+    the high level :class:`cebra.CEBRA` API.
+
+    Parameters
+    ----------
+    name: str
+        Requested model architecture name.
+
+    Returns
+    -------
+    str
+        Normalized architecture name that is registered in the cebra registry.
+    """
+
     import cebra, re
 
-    name = getattr(cfg.cebra, "model_architecture", "offset0-model").lower()
+    normalized = name.lower()
 
     aliases = {"offset0-model": "offset1-model"}
     name = aliases.get(name, name)
@@ -93,17 +110,30 @@ def _build_model(cfg: AppConfig, num_neurons: int):
         ),
     }
 
-    ModelClass = registry.get(name)
+    ModelClass = registry.get(normalized)
     if ModelClass is None:
-        # Attempt to dynamically resolve the model class from its name
-        parts = [p for p in re.split(r"[-_]", name) if p]
+        parts = [p for p in re.split(r"[-_]", normalized) if p]
         class_name = "".join(part.capitalize() for part in parts)
         ModelClass = getattr(cebra.models, class_name, None)
 
     if ModelClass is None:
         raise ValueError(f"Unsupported model_architecture: {name}")
 
-    return ModelClass(
+    if normalized not in cebra.models.get_options():
+        cebra.models.register(normalized, override=True, deprecated=True)(ModelClass)
+
+    return normalized
+
+
+def _build_model(cfg: AppConfig, num_neurons: int):
+    import cebra
+
+    name = normalize_model_architecture(
+        getattr(cfg.cebra, "model_architecture", "offset0-model")
+    )
+
+    return cebra.models.init(
+        name,
         num_neurons=num_neurons,
         num_units=cfg.cebra.params.get("num_units", 512),
         num_output=cfg.cebra.output_dim,

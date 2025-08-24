@@ -11,7 +11,12 @@ from hydra.core.hydra_config import HydraConfig
 from src.data import load_and_prepare_dataset
 from src.utils import get_embedding_cache_path, save_text_embedding, load_text_embedding
 from src.embeddings import get_embeddings
-from src.cebra_trainer import train_cebra, save_cebra_model, transform_cebra
+from src.cebra_trainer import (
+    train_cebra,
+    save_cebra_model,
+    transform_cebra,
+    normalize_model_architecture,
+)
 from sklearn.model_selection import train_test_split
 from src.results import (save_interactive_plot, save_static_2d_plots,
                          run_knn_classification, run_knn_regression,
@@ -57,11 +62,13 @@ def main(cfg: AppConfig) -> None:
         mlflow.set_tag("hydra_run_dir", str(output_dir))
         mlflow.log_dict(OmegaConf.to_container(cfg, resolve=True), "config.yaml")
 
-        mlflow.set_tags({"cebra_model": cfg.cebra.model_architecture, "output_dim": str(cfg.cebra.output_dim) })
+        arch = normalize_model_architecture(cfg.cebra.model_architecture)
+        cfg.cebra.model_architecture = arch
+        mlflow.set_tags({"cebra_model": arch, "output_dim": str(cfg.cebra.output_dim) })
         mlflow.log_param("cebra_output_dim", cfg.cebra.output_dim)
         mlflow.log_param("cebra_max_iterations", cfg.cebra.max_iterations)
         mlflow.log_param("cebra_conditional", cfg.cebra.conditional)
-        mlflow.log_param("cebra_model_architecture", cfg.cebra.model_architecture)
+        mlflow.log_param("cebra_model_architecture", arch)
 
         # --- 1. Load Dataset ---
         print("\n--- Step 1: Loading dataset ---")
