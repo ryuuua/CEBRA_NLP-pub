@@ -87,6 +87,7 @@ def main(cfg: AppConfig) -> None:
 
         labels_for_training = None if cfg.cebra.conditional == 'None' else conditional_train
 
+
         results_records = []
         step_counter = 0
         # Loop over hyperparameters and dimensions
