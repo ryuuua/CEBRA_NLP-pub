@@ -197,6 +197,22 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
     )
 
     model = _build_model(cfg, X_vectors.shape[1])
+
+    # Some CEBRA models expose a classifier head that needs to be configured
+    # with the number of output classes.  This is indicated by the presence of
+    # a ``set_output_num`` method.  When such a model is requested we infer the
+    # number of classes from the provided labels and initialize the classifier.
+    if hasattr(model, "set_output_num"):
+        if labels is None:
+            raise ValueError(
+                "Classifier model requested but `labels` are missing"
+            )
+        if labels.ndim == 1:
+            num_classes = int(labels.max()) + 1
+        else:
+            num_classes = labels.shape[1]
+        model.set_output_num(num_classes)
+
     if cfg.ddp.world_size > 1 and torch.distributed.is_initialized():
         model = torch.nn.parallel.DistributedDataParallel(
             model, device_ids=[cfg.ddp.local_rank]
@@ -226,6 +242,8 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
                 if loss_type == "mse":
                     batch_x, batch_y = batch
                     embeddings = model(batch_x.to(cfg.device, non_blocking=True))
+                    if isinstance(embeddings, tuple):
+                        embeddings = embeddings[0]
                     loss = criterion(
                         embeddings, batch_y.to(cfg.device, non_blocking=True)
                     )
@@ -233,12 +251,16 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
                     if labels is None:
                         (batch_x,) = batch
                         embeddings = model(batch_x.to(cfg.device, non_blocking=True))
+                        if isinstance(embeddings, tuple):
+                            embeddings = embeddings[0]
                         if embeddings is None:
                             raise ValueError("Model returned no embeddings")
                         loss = criterion(embeddings)
                     else:
                         batch_x, batch_y = batch
                         embeddings = model(batch_x.to(cfg.device, non_blocking=True))
+                        if isinstance(embeddings, tuple):
+                            embeddings = embeddings[0]
                         if embeddings is None:
                             raise ValueError("Model returned no embeddings")
                         if batch_y is None:
