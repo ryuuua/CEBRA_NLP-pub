@@ -69,6 +69,14 @@ class ConsistencyCheckConfig:
     num_runs: int = 5     # 何回モデルを訓練するか
 
 
+@dataclass
+class HyperParamTuningConfig:
+    """Hyperparameter ranges for grid search."""
+    output_dims: List[int] = field(default_factory=lambda: list(range(2, 21)))
+    batch_sizes: List[int] = field(default_factory=lambda: [512])
+    learning_rates: List[float] = field(default_factory=lambda: [1e-3])
+
+
 # 全ての設定をまとめるトップレベルのデータクラス
 @dataclass
 class AppConfig:
@@ -79,4 +87,5 @@ class AppConfig:
     evaluation: EvaluationConfig
     mlflow: MLflowConfig
     consistency_check: ConsistencyCheckConfig
+    hpt: HyperParamTuningConfig
     ddp: DDPConfig

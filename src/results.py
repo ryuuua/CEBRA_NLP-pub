@@ -22,7 +22,7 @@ from sklearn.neighbors import KNeighborsRegressor
 from sklearn.metrics import mean_squared_error, r2_score
 import torch
 import gc
-from .cebra_trainer import train_cebra, transform_cebra, load_cebra_model
+import cebra
 # train_test_splitはこのファイルで使われていないため削除
 
 
@@ -161,6 +161,7 @@ def run_consistency_check(
     cfg: AppConfig,
     output_dir: Path,
     y_valid=None,
+    step: int | None = None,
 ):
 
     print("\n--- Step 6: Running Consistency Check ---")
@@ -173,11 +174,25 @@ def run_consistency_check(
 
     model_paths = []
     for i in tqdm(range(num_runs), desc="Training models for consistency check"):
-        model = train_cebra(X_train, y_train, cfg, output_dir)
+        arch = cfg.cebra.model_architecture
+        if arch == "offset0-model":
+            arch = "offset1-model"
+        model = cebra.CEBRA(
+            model_architecture=arch,
+            output_dimension=cfg.cebra.output_dim,
+            max_iterations=cfg.cebra.max_iterations,
+            batch_size=cfg.cebra.params.get("batch_size", 512),
+            learning_rate=cfg.cebra.params.get("learning_rate", 1e-3),
+            conditional=None if cfg.cebra.conditional == "None" else cfg.cebra.conditional,
+            device=cfg.device,
+        )
+        if y_train is None:
+            model.fit(X_train)
+        else:
+            model.fit(X_train, y_train)
         tmp_file = Path(tempfile.gettempdir(), f"cebra_consistency_{i}.pt")
-        torch.save(model.state_dict(), tmp_file)
+        model.save(str(tmp_file))
         model_paths.append(tmp_file)
-        # Release resources from this training run
         del model
         gc.collect()
         torch.cuda.empty_cache()
@@ -185,31 +200,37 @@ def run_consistency_check(
     train_embeddings = []
     valid_embeddings = []
     for tmp_file in tqdm(model_paths, desc="Transforming with saved models"):
-        loaded_model = load_cebra_model(tmp_file, cfg, X_train.shape[1])
-        train_embeddings.append(transform_cebra(loaded_model, X_train, cfg.device))
-        valid_embeddings.append(transform_cebra(loaded_model, X_valid, cfg.device))
+        loaded_model = cebra.CEBRA.load(str(tmp_file))
+        train_embeddings.append(loaded_model.transform(X_train))
+        valid_embeddings.append(loaded_model.transform(X_valid))
         tmp_file.unlink()
         del loaded_model
         gc.collect()
         torch.cuda.empty_cache()
 
+    train_mean = valid_mean = None
     for name, embeddings in [("train", train_embeddings), ("valid", valid_embeddings)]:
         print(f"\nComputing consistency for {name} data...")
         scores, pairs, ids_runs = consistency_score(embeddings=embeddings, between="runs")
-        
+
         mean_score = scores.mean()
-        mlflow.log_metric(f"consistency_score_{name}", mean_score)
+        mlflow.log_metric(f"consistency_score_{name}", mean_score, step=step)
         print(f"Mean consistency score ({name}): {mean_score:.4f}")
+        if name == "train":
+            train_mean = mean_score
+        else:
+            valid_mean = mean_score
 
         ax = plot_consistency(scores, pairs, ids_runs)
         plot_path = output_dir / f"consistency_plot_{name}.png"
-        
+
         # Axesオブジェクト(ax)の親であるFigureオブジェクト(ax.figure)に対してsavefigを実行
         ax.figure.savefig(plot_path)
-        
+
         # Figureを閉じる
         plt.close(ax.figure)
         mlflow.log_artifact(str(plot_path), "plots")
 
     # Restore original persistent_workers setting
     cfg.cebra.persistent_workers = original_persistent
+    return train_mean, valid_mean

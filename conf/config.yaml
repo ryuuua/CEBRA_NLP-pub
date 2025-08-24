@@ -4,6 +4,7 @@ defaults:
   - embedding: bert
   - cebra: cebra7dim2
   - consistency_check: default
+  - hpt: default
   - _self_
 
 hydra:
