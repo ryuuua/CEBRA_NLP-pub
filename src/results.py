@@ -23,6 +23,7 @@ from sklearn.metrics import mean_squared_error, r2_score
 import torch
 import gc
 import cebra
+from .cebra_trainer import normalize_model_architecture
 # train_test_splitはこのファイルで使われていないため削除
 
 
@@ -174,9 +175,7 @@ def run_consistency_check(
 
     model_paths = []
     for i in tqdm(range(num_runs), desc="Training models for consistency check"):
-        arch = cfg.cebra.model_architecture
-        if arch == "offset0-model":
-            arch = "offset1-model"
+        arch = normalize_model_architecture(cfg.cebra.model_architecture)
         model = cebra.CEBRA(
             model_architecture=arch,
             output_dimension=cfg.cebra.output_dim,

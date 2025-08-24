@@ -39,35 +39,93 @@ def save_cebra_embeddings(embeddings, output_dir):
     return path
 
 
-def _build_model(cfg: AppConfig, num_neurons: int):
+def normalize_model_architecture(name: str) -> str:
+    """Normalize and register a model architecture name.
+
+    This ensures that custom architectures such as ``offset0-model`` are
+    registered with ``cebra``'s model registry so they can be referenced by
+    the high level :class:`cebra.CEBRA` API.
+
+    Parameters
+    ----------
+    name: str
+        Requested model architecture name.
+
+    Returns
+    -------
+    str
+        Normalized architecture name that is registered in the cebra registry.
+    """
+
     import cebra, re
 
-    name = getattr(cfg.cebra, "model_architecture", "offset0-model").lower()
+    normalized = name.lower()
+
 
     registry = {
+
         "offset0-model": cebra.models.Offset0Model,
         "offset1-model": getattr(
             cebra.models, "Offset1Model", cebra.models.Offset0Model
         ),
         "offset5-model": getattr(
             cebra.models, "Offset5Model", cebra.models.Offset0Model
+
         ),
-        "offset10-model": getattr(
-            cebra.models, "Offset10Model", cebra.models.Offset0Model
+        "offset5-model": getattr(cebra.models, "Offset5Model", default_model),
+        "offset10-model": getattr(cebra.models, "Offset10Model", default_model),
+        "offset10-model-mse": getattr(
+            cebra.models, "Offset10ModelMSE", default_model
+        ),
+        "offset0-model-mse": getattr(
+            cebra.models, "Offset0ModelMSE", default_model
+        ),
+        "offset0-model-v2": getattr(cebra.models, "Offset0ModelV2", default_model),
+        "offset0-model-v3": getattr(cebra.models, "Offset0ModelV3", default_model),
+        "offset0-model-v4": getattr(cebra.models, "Offset0ModelV4", default_model),
+        "offset0-model-v5": getattr(cebra.models, "Offset0ModelV5", default_model),
+        "offset36-model": getattr(cebra.models, "Offset36", default_model),
+        "offset36-dropout": getattr(
+            cebra.models, "Offset36Dropout", default_model
+        ),
+        "offset36-dropout-v2": getattr(
+            cebra.models, "Offset36DropoutV2", default_model
+        ),
+        "resample-model": getattr(cebra.models, "ResampleModel", default_model),
+        "resample5-model": getattr(cebra.models, "Resample5Model", default_model),
+        "resample1-model": getattr(cebra.models, "Resample1Model", default_model),
+        "supervised10-model": getattr(
+            cebra.models, "SupervisedNN10", default_model
+        ),
+        "supervised1-model": getattr(
+            cebra.models, "SupervisedNN1", default_model
         ),
     }
 
-    ModelClass = registry.get(name)
+    ModelClass = registry.get(normalized)
     if ModelClass is None:
-        # Attempt to dynamically resolve the model class from its name
-        parts = [p for p in re.split(r"[-_]", name) if p]
+        parts = [p for p in re.split(r"[-_]", normalized) if p]
         class_name = "".join(part.capitalize() for part in parts)
         ModelClass = getattr(cebra.models, class_name, None)
 
     if ModelClass is None:
         raise ValueError(f"Unsupported model_architecture: {name}")
 
-    return ModelClass(
+    if normalized not in cebra.models.get_options():
+        cebra.models.register(normalized, override=True, deprecated=True)(ModelClass)
+
+    return normalized
+
+
+def _build_model(cfg: AppConfig, num_neurons: int):
+    import cebra
+
+    name = normalize_model_architecture(
+        getattr(cfg.cebra, "model_architecture", "offset0-model")
+    )
+
+    return cebra.models.init(
+        name,
         num_neurons=num_neurons,
         num_units=cfg.cebra.params.get("num_units", 512),
         num_output=cfg.cebra.output_dim,
