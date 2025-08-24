@@ -16,3 +16,4 @@ torch
 tqdm
 transformers
 umap-learn
+kaleido
