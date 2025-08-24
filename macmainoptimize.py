@@ -2,6 +2,7 @@ import hydra
 import numpy as np
 from omegaconf import OmegaConf
 import torch
+import random
 import mlflow
 import pandas as pd
 from pathlib import Path
@@ -32,13 +33,14 @@ def main(cfg: AppConfig) -> None:
     cfg.ddp.world_size = 1
     cfg.ddp.rank = 0
     cfg.ddp.local_rank = 0
-    # Select the best available device
+
+    cfg.device = "mps" if torch.backends.mps.is_available() else "cpu"
+    random.seed(cfg.evaluation.random_state)
+    np.random.seed(cfg.evaluation.random_state)
+    torch.manual_seed(cfg.evaluation.random_state)
     if torch.cuda.is_available():
-        cfg.device = "cuda"
-    elif torch.backends.mps.is_available():
-        cfg.device = "mps"
-    else:
-        cfg.device = "cpu"
+        torch.cuda.manual_seed_all(cfg.evaluation.random_state)
+
     output_dir = Path(HydraConfig.get().run.dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 

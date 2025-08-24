@@ -23,3 +23,7 @@ python macmainoptimize.py
 ```bash
 torchrun --nproc_per_node=2 main.py
 ```
+
+## Reproducibility
+
+`evaluation.random_state` で指定した値を用いて Python の `random`、NumPy、PyTorch (CUDA が利用可能な場合は `torch.cuda` も含む) の乱数シードを設定し、結果の再現性を高めています。
