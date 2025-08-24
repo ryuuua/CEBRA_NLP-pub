@@ -3,7 +3,7 @@
 # A descriptive name for this configuration
 name: cebra7dim3.1
 
-model_architecture: offset0-model
+model_architecture: offset1-model
 # CEBRA-specific parameters
 output_dim: 3
 max_iterations: 10000

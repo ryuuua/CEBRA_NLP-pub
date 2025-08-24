@@ -2,7 +2,7 @@
 # A descriptive name for this configuration
 name: model7eucdis
 
-model_architecture: offset0-model
+model_architecture: offset1-model
 
 # CEBRA-specific parameters
 output_dim: 3

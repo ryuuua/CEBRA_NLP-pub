@@ -2,7 +2,7 @@
 
 # A descriptive name for this configuration
 name: cebra7_euc_8dim_lr4
-model_architecture: offset0-model
+model_architecture: offset1-model
 # CEBRA-specific parameters
 output_dim: 8
 max_iterations: 10000

@@ -46,6 +46,9 @@ def _build_model(cfg: AppConfig, num_neurons: int):
 
     registry = {
         "offset0-model": cebra.models.Offset0Model,
+        "offset1-model": getattr(
+            cebra.models, "Offset1Model", cebra.models.Offset0Model
+        ),
         "offset5-model": getattr(
             cebra.models, "Offset5Model", cebra.models.Offset0Model
         ),
