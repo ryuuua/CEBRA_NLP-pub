@@ -208,23 +208,29 @@ def run_consistency_check(
         gc.collect()
         torch.cuda.empty_cache()
 
+    train_mean = valid_mean = None
     for name, embeddings in [("train", train_embeddings), ("valid", valid_embeddings)]:
         print(f"\nComputing consistency for {name} data...")
         scores, pairs, ids_runs = consistency_score(embeddings=embeddings, between="runs")
-        
+
         mean_score = scores.mean()
         mlflow.log_metric(f"consistency_score_{name}", mean_score, step=step)
         print(f"Mean consistency score ({name}): {mean_score:.4f}")
+        if name == "train":
+            train_mean = mean_score
+        else:
+            valid_mean = mean_score
 
         ax = plot_consistency(scores, pairs, ids_runs)
         plot_path = output_dir / f"consistency_plot_{name}.png"
-        
+
         # Axesオブジェクト(ax)の親であるFigureオブジェクト(ax.figure)に対してsavefigを実行
         ax.figure.savefig(plot_path)
-        
+
         # Figureを閉じる
         plt.close(ax.figure)
         mlflow.log_artifact(str(plot_path), "plots")
 
     # Restore original persistent_workers setting
     cfg.cebra.persistent_workers = original_persistent
+    return train_mean, valid_mean

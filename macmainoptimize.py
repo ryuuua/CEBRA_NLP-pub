@@ -87,93 +87,131 @@ def main(cfg: AppConfig) -> None:
 
         labels_for_training = None if cfg.cebra.conditional == 'None' else conditional_train
 
-        # Loop over dimensions
-        for dim in range(2, 21):
-            print(f"\n=== Running pipeline for output_dim={dim} ===")
-            cfg.cebra.output_dim = dim
-            dim_output_dir = output_dir / f"dim_{dim}"
-            dim_output_dir.mkdir(parents=True, exist_ok=True)
-            mlflow.log_metric("cebra_output_dim", dim, step=dim)
 
-            # Train CEBRA model
-            print("\n--- Step 4: Training CEBRA model ---")
-            arch = cfg.cebra.model_architecture
-            if arch == "offset0-model":
-                arch = "offset1-model"
-            cebra_model = cebra.CEBRA(
-                model_architecture=arch,
-                output_dimension=dim,
-                max_iterations=cfg.cebra.max_iterations,
-                batch_size=cfg.cebra.params.get('batch_size', 512),
-                learning_rate=cfg.cebra.params.get('learning_rate', 1e-3),
-                conditional=None if cfg.cebra.conditional == 'None' else cfg.cebra.conditional,
-                device=cfg.device,
+        results_records = []
+        step_counter = 0
+        # Loop over hyperparameters and dimensions
+        for dim in cfg.hpt.output_dims:
+            for batch_size in cfg.hpt.batch_sizes:
+                for lr in cfg.hpt.learning_rates:
+                    print(f"\n=== Running pipeline for output_dim={dim}, batch_size={batch_size}, lr={lr} ===")
+                    cfg.cebra.output_dim = dim
+                    cfg.cebra.params["batch_size"] = batch_size
+                    cfg.cebra.params["learning_rate"] = lr
+                    dim_output_dir = output_dir / f"dim_{dim}_bs{batch_size}_lr{lr}"
+                    dim_output_dir.mkdir(parents=True, exist_ok=True)
+                    mlflow.log_param("output_dim", dim)
+                    mlflow.log_param("batch_size", batch_size)
+                    mlflow.log_param("learning_rate", lr)
+
+                    # Train CEBRA model
+                    print("\n--- Step 4: Training CEBRA model ---")
+                    arch = cfg.cebra.model_architecture
+                    if arch == "offset0-model":
+                        arch = "offset1-model"
+                    cebra_model = cebra.CEBRA(
+                        model_architecture=arch,
+                        output_dimension=dim,
+                        max_iterations=cfg.cebra.max_iterations,
+                        batch_size=batch_size,
+                        learning_rate=lr,
+                        conditional=None if cfg.cebra.conditional == 'None' else cfg.cebra.conditional,
+                        device=cfg.device,
+                    )
+                    if labels_for_training is None:
+                        cebra_model.fit(X_train)
+                    else:
+                        cebra_model.fit(X_train, labels_for_training)
+                    model_path = dim_output_dir / "cebra_model.pt"
+                    cebra_model.save(str(model_path))
+                    mlflow.log_artifact(str(model_path), f"model_dim_{dim}_bs{batch_size}_lr{lr}")
+
+                    # Transform Data
+                    print("\n--- Step 5: Transforming data ---")
+                    cebra_embeddings_full = cebra_model.transform(X_vectors)
+                    cebra_train_embeddings = cebra_model.transform(X_train)
+                    cebra_valid_embeddings = cebra_model.transform(X_valid)
+
+                    # Goodness of Fit
+                    if cfg.cebra.conditional == 'None':
+                        gof = goodness_of_fit_score(cebra_model, X_valid)
+                    else:
+                        gof = goodness_of_fit_score(cebra_model, X_valid, conditional_valid)
+                    print(f"Goodness of fit (bits): {gof:.4f}")
+                    mlflow.log_metric("goodness_of_fit_bits", gof, step=step_counter)
+
+                    # Visualization & Evaluation
+                    print("\n--- Step 6: Visualization and Evaluation ---")
+                    if cfg.cebra.conditional == 'discrete':
+                        label_map = {int(k): v for k, v in cfg.dataset.label_map.items()}
+                        text_labels_full = [label_map[l] for l in conditional_data]
+                        palette = OmegaConf.to_container(cfg.dataset.visualization.emotion_colors, resolve=True)
+                        order = OmegaConf.to_container(cfg.dataset.visualization.emotion_order, resolve=True)
+                        save_interactive_plot(cebra_embeddings_full, text_labels_full, dim, palette, "Interactive CEBRA (Discrete)", dim_output_dir / "cebra_interactive_discrete.html")
+                        accuracy, report = run_knn_classification(
+                            train_embeddings=cebra_train_embeddings,
+                            valid_embeddings=cebra_valid_embeddings,
+                            y_train=conditional_train,
+                            y_valid=conditional_valid,
+                            label_map=label_map,
+                            output_dir=dim_output_dir,
+                            knn_neighbors=cfg.evaluation.knn_neighbors,
+                        )
+                        mlflow.log_metric("knn_accuracy", accuracy, step=step_counter)
+                        mlflow.log_dict(report, f"classification_report_dim_{dim}_bs{batch_size}_lr{lr}.json")
+                    elif cfg.cebra.conditional == 'None':
+                        valence_scores = conditional_data[:, 0]
+                        save_interactive_plot(
+                            embeddings=cebra_embeddings_full,
+                            text_labels=valence_scores,
+                            output_dim=dim,
+                            palette=None,
+                            title="Interactive CEBRA (None - Colored by Valence)",
+                            output_path=dim_output_dir / "None.html",
+                        )
+                        mse, r2 = run_knn_regression(
+                            train_embeddings=cebra_train_embeddings,
+                            valid_embeddings=cebra_valid_embeddings,
+                            y_train=conditional_train,
+                            y_valid=conditional_valid,
+                            output_dir=dim_output_dir,
+                            knn_neighbors=cfg.evaluation.knn_neighbors,
+                        )
+                        mlflow.log_metric("knn_regression_mse", mse, step=step_counter)
+                        mlflow.log_metric("knn_regression_r2", r2, step=step_counter)
+
+                    train_consistency = valid_consistency = None
+                    # Consistency Check
+                    if cfg.consistency_check.enabled:
+                        train_consistency, valid_consistency = run_consistency_check(
+                            X_train, labels_for_training, X_valid, cfg, dim_output_dir, step=step_counter
+                        )
+
+                    results_records.append(
+                        {
+                            "output_dim": dim,
+                            "batch_size": batch_size,
+                            "learning_rate": lr,
+                            "gof": gof,
+                            "train_consistency": train_consistency,
+                            "valid_consistency": valid_consistency,
+                        }
+                    )
+                    step_counter += 1
+
+        if results_records:
+            results_df = pd.DataFrame(results_records)
+            results_path = output_dir / "hyperparameter_search_results.csv"
+            results_df.to_csv(results_path, index=False)
+            mlflow.log_artifact(str(results_path), "metrics")
+            best_row = results_df.sort_values("gof", ascending=False).iloc[0]
+            print(
+                f"Best GoF found for dim={best_row.output_dim}, batch_size={best_row.batch_size}, lr={best_row.learning_rate}: {best_row.gof:.4f}"
             )
-            if labels_for_training is None:
-                cebra_model.fit(X_train)
-            else:
-                cebra_model.fit(X_train, labels_for_training)
-            model_path = dim_output_dir / "cebra_model.pt"
-            cebra_model.save(str(model_path))
-            mlflow.log_artifact(str(model_path), f"model_dim_{dim}")
-
-            # Transform Data
-            print("\n--- Step 5: Transforming data ---")
-            cebra_embeddings_full = cebra_model.transform(X_vectors)
-            cebra_train_embeddings = cebra_model.transform(X_train)
-            cebra_valid_embeddings = cebra_model.transform(X_valid)
-
-            # Goodness of Fit
-            if cfg.cebra.conditional == 'None':
-                gof = goodness_of_fit_score(cebra_model, X_valid)
-            else:
-                gof = goodness_of_fit_score(cebra_model, X_valid, conditional_valid)
-            print(f"Goodness of fit (bits): {gof:.4f}")
-            mlflow.log_metric("goodness_of_fit_bits", gof, step=dim)
-
-            # Visualization & Evaluation
-            print("\n--- Step 6: Visualization and Evaluation ---")
-            if cfg.cebra.conditional == 'discrete':
-                label_map = {int(k): v for k, v in cfg.dataset.label_map.items()}
-                text_labels_full = [label_map[l] for l in conditional_data]
-                palette = OmegaConf.to_container(cfg.dataset.visualization.emotion_colors, resolve=True)
-                order = OmegaConf.to_container(cfg.dataset.visualization.emotion_order, resolve=True)
-                save_interactive_plot(cebra_embeddings_full, text_labels_full, dim, palette, "Interactive CEBRA (Discrete)", dim_output_dir / "cebra_interactive_discrete.html")
-                accuracy, report = run_knn_classification(
-                    train_embeddings=cebra_train_embeddings,
-                    valid_embeddings=cebra_valid_embeddings,
-                    y_train=conditional_train,
-                    y_valid=conditional_valid,
-                    label_map=label_map,
-                    output_dir=dim_output_dir,
-                    knn_neighbors=cfg.evaluation.knn_neighbors,
-                )
-                mlflow.log_metric("knn_accuracy", accuracy, step=dim)
-                mlflow.log_dict(report, f"classification_report_dim_{dim}.json")
-            elif cfg.cebra.conditional == 'None':
-                valence_scores = conditional_data[:, 0]
-                save_interactive_plot(
-                    embeddings=cebra_embeddings_full,
-                    text_labels=valence_scores,
-                    output_dim=dim,
-                    palette=None,
-                    title="Interactive CEBRA (None - Colored by Valence)",
-                    output_path=dim_output_dir / "None.html",
-                )
-                mse, r2 = run_knn_regression(
-                    train_embeddings=cebra_train_embeddings,
-                    valid_embeddings=cebra_valid_embeddings,
-                    y_train=conditional_train,
-                    y_valid=conditional_valid,
-                    output_dir=dim_output_dir,
-                    knn_neighbors=cfg.evaluation.knn_neighbors,
-                )
-                mlflow.log_metric("knn_regression_mse", mse, step=dim)
-                mlflow.log_metric("knn_regression_r2", r2, step=dim)
-
-            # Consistency Check
-            if cfg.consistency_check.enabled:
-                run_consistency_check(X_train, labels_for_training, X_valid, cfg, dim_output_dir, step=dim)
+            mlflow.log_param("best_dim", int(best_row.output_dim))
+            mlflow.log_param("best_batch_size", int(best_row.batch_size))
+            mlflow.log_param("best_learning_rate", float(best_row.learning_rate))
+            mlflow.log_metric("best_gof", float(best_row.gof))
 
         print("\n--- Pipeline Complete ---")
 
