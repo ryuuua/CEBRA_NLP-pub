@@ -1,0 +1,181 @@
+import hydra
+import numpy as np
+from omegaconf import OmegaConf
+import torch
+import mlflow
+import pandas as pd
+from pathlib import Path
+from datasets import load_dataset
+from src.config_schema import AppConfig
+from hydra.core.hydra_config import HydraConfig
+from src.data import load_and_prepare_dataset
+from src.utils import get_embedding_cache_path, save_text_embedding, load_text_embedding
+from src.embeddings import get_embeddings
+from sklearn.model_selection import train_test_split
+from src.results import (
+    save_interactive_plot,
+    run_knn_classification,
+    run_knn_regression,
+    run_consistency_check,
+)
+from dotenv import load_dotenv
+import os
+from cebra.integrations.sklearn.metrics import goodness_of_fit_score
+import cebra
+
+load_dotenv()
+
+@hydra.main(config_path="conf", config_name="config", version_base="1.2")
+def main(cfg: AppConfig) -> None:
+    OmegaConf.set_struct(cfg, False)
+    cfg.ddp.world_size = 1
+    cfg.ddp.rank = 0
+    cfg.ddp.local_rank = 0
+    cfg.device = "mps" if torch.backends.mps.is_available() else "cpu"
+    output_dir = Path(HydraConfig.get().run.dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    if cfg.mlflow.tracking_uri:
+        mlflow.set_tracking_uri(cfg.mlflow.tracking_uri)
+    experiment_name = f"{cfg.mlflow.experiment_name}_{cfg.dataset.name}"
+    experiment = mlflow.get_experiment_by_name(experiment_name)
+    if experiment is None:
+        mlflow.create_experiment(name=experiment_name)
+    mlflow.set_experiment(experiment_name)
+    run_name = HydraConfig.get().job.name
+    with mlflow.start_run(run_name=run_name) as run:
+        run_id = run.info.run_id
+        print(f"MLflow Run Name: {run_name}, Run ID: {run_id}")
+        (output_dir / "mlflow_run_id.txt").write_text(run_id)
+        mlflow.set_tag("hydra_run_dir", str(output_dir))
+        mlflow.log_dict(OmegaConf.to_container(cfg, resolve=True), "config.yaml")
+
+        # 1. Load Dataset
+        print("\n--- Step 1: Loading dataset ---")
+        if cfg.cebra.conditional == 'None':
+            dataset_cfg = cfg.dataset
+            dataset = load_dataset(
+                path=dataset_cfg.hf_path,
+                data_files=dataset_cfg.data_files
+            )
+            df = pd.concat([pd.DataFrame(dataset[s]) for s in dataset.keys()], ignore_index=True)
+            df = df.dropna(subset=[dataset_cfg.text_column, 'V', 'A', 'D']).reset_index(drop=True)
+            vad_columns = ['V', 'A', 'D']
+            df_vad = df[vad_columns]
+            conditional_data = df_vad.to_numpy(dtype=np.float32)
+            texts = df[dataset_cfg.text_column].astype(str).tolist()
+            time_indices = np.arange(len(texts))
+        else:
+            texts, conditional_data, time_indices = load_and_prepare_dataset(cfg)
+
+        # 2. Get Text Embeddings
+        print("\n--- Step 2: Generating text embeddings ---")
+        embedding_cache_path = get_embedding_cache_path(cfg)
+        X_vectors = load_text_embedding(embedding_cache_path)
+        if X_vectors is None:
+            X_vectors = get_embeddings(texts, cfg)
+            save_text_embedding(X_vectors, embedding_cache_path)
+
+        # Data Splitting
+        print("\n--- Step 3: Splitting data ---")
+        X_train, X_valid, conditional_train, conditional_valid, time_train, time_valid = train_test_split(
+            X_vectors, conditional_data, time_indices,
+            test_size=cfg.evaluation.test_size,
+            random_state=cfg.evaluation.random_state,
+            stratify=(conditional_data if cfg.cebra.conditional == 'discrete' else None)
+        )
+
+        labels_for_training = None if cfg.cebra.conditional == 'None' else conditional_train
+
+        # Loop over dimensions
+        for dim in range(2, 21):
+            print(f"\n=== Running pipeline for output_dim={dim} ===")
+            cfg.cebra.output_dim = dim
+            dim_output_dir = output_dir / f"dim_{dim}"
+            dim_output_dir.mkdir(parents=True, exist_ok=True)
+            mlflow.log_metric("cebra_output_dim", dim, step=dim)
+
+            # Train CEBRA model
+            print("\n--- Step 4: Training CEBRA model ---")
+            arch = cfg.cebra.model_architecture
+            if arch == "offset0-model":
+                arch = "offset1-model"
+            cebra_model = cebra.CEBRA(
+                model_architecture=arch,
+                output_dimension=dim,
+                max_iterations=cfg.cebra.max_iterations,
+                batch_size=cfg.cebra.params.get('batch_size', 512),
+                learning_rate=cfg.cebra.params.get('learning_rate', 1e-3),
+                conditional=None if cfg.cebra.conditional == 'None' else cfg.cebra.conditional,
+                device=cfg.device,
+            )
+            if labels_for_training is None:
+                cebra_model.fit(X_train)
+            else:
+                cebra_model.fit(X_train, labels_for_training)
+            model_path = dim_output_dir / "cebra_model.pt"
+            cebra_model.save(str(model_path))
+            mlflow.log_artifact(str(model_path), f"model_dim_{dim}")
+
+            # Transform Data
+            print("\n--- Step 5: Transforming data ---")
+            cebra_embeddings_full = cebra_model.transform(X_vectors)
+            cebra_train_embeddings = cebra_model.transform(X_train)
+            cebra_valid_embeddings = cebra_model.transform(X_valid)
+
+            # Goodness of Fit
+            if cfg.cebra.conditional == 'None':
+                gof = goodness_of_fit_score(cebra_model, X_valid)
+            else:
+                gof = goodness_of_fit_score(cebra_model, X_valid, conditional_valid)
+            print(f"Goodness of fit (bits): {gof:.4f}")
+            mlflow.log_metric("goodness_of_fit_bits", gof, step=dim)
+
+            # Visualization & Evaluation
+            print("\n--- Step 6: Visualization and Evaluation ---")
+            if cfg.cebra.conditional == 'discrete':
+                label_map = {int(k): v for k, v in cfg.dataset.label_map.items()}
+                text_labels_full = [label_map[l] for l in conditional_data]
+                palette = OmegaConf.to_container(cfg.dataset.visualization.emotion_colors, resolve=True)
+                order = OmegaConf.to_container(cfg.dataset.visualization.emotion_order, resolve=True)
+                save_interactive_plot(cebra_embeddings_full, text_labels_full, dim, palette, "Interactive CEBRA (Discrete)", dim_output_dir / "cebra_interactive_discrete.html")
+                accuracy, report = run_knn_classification(
+                    train_embeddings=cebra_train_embeddings,
+                    valid_embeddings=cebra_valid_embeddings,
+                    y_train=conditional_train,
+                    y_valid=conditional_valid,
+                    label_map=label_map,
+                    output_dir=dim_output_dir,
+                    knn_neighbors=cfg.evaluation.knn_neighbors,
+                )
+                mlflow.log_metric("knn_accuracy", accuracy, step=dim)
+                mlflow.log_dict(report, f"classification_report_dim_{dim}.json")
+            elif cfg.cebra.conditional == 'None':
+                valence_scores = conditional_data[:, 0]
+                save_interactive_plot(
+                    embeddings=cebra_embeddings_full,
+                    text_labels=valence_scores,
+                    output_dim=dim,
+                    palette=None,
+                    title="Interactive CEBRA (None - Colored by Valence)",
+                    output_path=dim_output_dir / "None.html",
+                )
+                mse, r2 = run_knn_regression(
+                    train_embeddings=cebra_train_embeddings,
+                    valid_embeddings=cebra_valid_embeddings,
+                    y_train=conditional_train,
+                    y_valid=conditional_valid,
+                    output_dir=dim_output_dir,
+                    knn_neighbors=cfg.evaluation.knn_neighbors,
+                )
+                mlflow.log_metric("knn_regression_mse", mse, step=dim)
+                mlflow.log_metric("knn_regression_r2", r2, step=dim)
+
+            # Consistency Check
+            if cfg.consistency_check.enabled:
+                run_consistency_check(X_train, labels_for_training, X_valid, cfg, dim_output_dir, step=dim)
+
+        print("\n--- Pipeline Complete ---")
+
+if __name__ == "__main__":
+    main()
