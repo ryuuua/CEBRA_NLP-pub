@@ -61,10 +61,6 @@ def normalize_model_architecture(name: str) -> str:
 
     normalized = name.lower()
 
-    aliases = {"offset0-model": "offset1-model"}
-    name = aliases.get(name, name)
-
-    default_model = getattr(cebra.models, "Offset1Model", cebra.models.Offset0Model)
 
     registry = {
         "offset1-model": default_model,
