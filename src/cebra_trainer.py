@@ -44,13 +44,52 @@ def _build_model(cfg: AppConfig, num_neurons: int):
 
     name = getattr(cfg.cebra, "model_architecture", "offset0-model").lower()
 
+    aliases = {"offset0-model": "offset1-model"}
+    name = aliases.get(name, name)
+
+    default_model = getattr(cebra.models, "Offset1Model", cebra.models.Offset0Model)
+
     registry = {
-        "offset0-model": cebra.models.Offset0Model,
-        "offset5-model": getattr(
-            cebra.models, "Offset5Model", cebra.models.Offset0Model
+        "offset1-model": default_model,
+        "offset1-model-v2": getattr(
+            cebra.models, "Offset1ModelV2", default_model
         ),
-        "offset10-model": getattr(
-            cebra.models, "Offset10Model", cebra.models.Offset0Model
+        "offset1-model-v3": getattr(
+            cebra.models, "Offset1ModelV3", default_model
+        ),
+        "offset1-model-v4": getattr(
+            cebra.models, "Offset1ModelV4", default_model
+        ),
+        "offset1-model-v5": getattr(
+            cebra.models, "Offset1ModelV5", default_model
+        ),
+        "offset5-model": getattr(cebra.models, "Offset5Model", default_model),
+        "offset10-model": getattr(cebra.models, "Offset10Model", default_model),
+        "offset10-model-mse": getattr(
+            cebra.models, "Offset10ModelMSE", default_model
+        ),
+        "offset0-model-mse": getattr(
+            cebra.models, "Offset0ModelMSE", default_model
+        ),
+        "offset0-model-v2": getattr(cebra.models, "Offset0ModelV2", default_model),
+        "offset0-model-v3": getattr(cebra.models, "Offset0ModelV3", default_model),
+        "offset0-model-v4": getattr(cebra.models, "Offset0ModelV4", default_model),
+        "offset0-model-v5": getattr(cebra.models, "Offset0ModelV5", default_model),
+        "offset36-model": getattr(cebra.models, "Offset36", default_model),
+        "offset36-dropout": getattr(
+            cebra.models, "Offset36Dropout", default_model
+        ),
+        "offset36-dropout-v2": getattr(
+            cebra.models, "Offset36DropoutV2", default_model
+        ),
+        "resample-model": getattr(cebra.models, "ResampleModel", default_model),
+        "resample5-model": getattr(cebra.models, "Resample5Model", default_model),
+        "resample1-model": getattr(cebra.models, "Resample1Model", default_model),
+        "supervised10-model": getattr(
+            cebra.models, "SupervisedNN10", default_model
+        ),
+        "supervised1-model": getattr(
+            cebra.models, "SupervisedNN1", default_model
         ),
     }
 
