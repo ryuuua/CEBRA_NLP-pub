@@ -117,7 +117,9 @@ def main(cfg: AppConfig) -> None:
                             cebra_model.fit(X_train, labels_for_training)
                         model_path = dim_output_dir / "cebra_model.pt"
                         cebra_model.save(str(model_path))
-                        wandb.save(str(model_path))
+                        model_artifact = wandb.Artifact(name=model_path.stem, type="model")
+                        model_artifact.add_file(str(model_path))
+                        wandb.log_artifact(model_artifact)
 
                         # Transform Data
                         print("\n--- Step 5: Transforming data ---")
@@ -140,14 +142,18 @@ def main(cfg: AppConfig) -> None:
                             text_labels_full = [label_map[l] for l in conditional_data]
                             palette = OmegaConf.to_container(cfg.dataset.visualization.emotion_colors, resolve=True)
                             order = OmegaConf.to_container(cfg.dataset.visualization.emotion_order, resolve=True)
+                            interactive_path = dim_output_dir / "cebra_interactive_discrete.html"
                             save_interactive_plot(
                                 cebra_embeddings_full,
                                 text_labels_full,
                                 dim,
                                 palette,
                                 "Interactive CEBRA (Discrete)",
-                                dim_output_dir / "cebra_interactive_discrete.html",
+                                interactive_path,
                             )
+                            vis_artifact = wandb.Artifact(name=interactive_path.stem, type="evaluation")
+                            vis_artifact.add_file(str(interactive_path))
+                            wandb.log_artifact(vis_artifact)
                             accuracy, report = run_knn_classification(
                                 train_embeddings=cebra_train_embeddings,
                                 valid_embeddings=cebra_valid_embeddings,
@@ -160,17 +166,23 @@ def main(cfg: AppConfig) -> None:
                             wandb.log({"knn_accuracy": accuracy}, step=step_counter)
                             report_path = dim_output_dir / f"classification_report_dim_{dim}_bs{batch_size}_lr{lr}.json"
                             pd.Series(report).to_json(report_path, indent=4)
-                            wandb.save(str(report_path))
+                            report_artifact = wandb.Artifact(name=report_path.stem, type="evaluation")
+                            report_artifact.add_file(str(report_path))
+                            wandb.log_artifact(report_artifact)
                         elif cfg.cebra.conditional == 'None':
                             valence_scores = conditional_data[:, 0]
+                            interactive_path = dim_output_dir / "None.html"
                             save_interactive_plot(
                                 embeddings=cebra_embeddings_full,
                                 text_labels=valence_scores,
                                 output_dim=dim,
                                 palette=None,
                                 title="Interactive CEBRA (None - Colored by Valence)",
-                                output_path=dim_output_dir / "None.html",
+                                output_path=interactive_path,
                             )
+                            vis_artifact = wandb.Artifact(name=interactive_path.stem, type="evaluation")
+                            vis_artifact.add_file(str(interactive_path))
+                            wandb.log_artifact(vis_artifact)
                             mse, r2 = run_knn_regression(
                                 train_embeddings=cebra_train_embeddings,
                                 valid_embeddings=cebra_valid_embeddings,
@@ -209,7 +221,9 @@ def main(cfg: AppConfig) -> None:
             results_df = pd.DataFrame(results_records)
             results_path = output_dir / "hyperparameter_search_results.csv"
             results_df.to_csv(results_path, index=False)
-            wandb.save(str(results_path))
+            results_artifact = wandb.Artifact(name=results_path.stem, type="evaluation")
+            results_artifact.add_file(str(results_path))
+            wandb.log_artifact(results_artifact)
             best_row = results_df.sort_values("gof", ascending=False).iloc[0]
             print(
                 f"Best GoF found for dim={best_row.output_dim}, batch_size={best_row.batch_size}, lr={best_row.learning_rate}: {best_row.gof:.4f}"
