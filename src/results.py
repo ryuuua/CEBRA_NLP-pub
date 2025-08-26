@@ -13,7 +13,7 @@ from sklearn.decomposition import PCA
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import accuracy_score, classification_report, ConfusionMatrixDisplay
 import tempfile
-import mlflow
+import wandb
 from tqdm import tqdm
 from .config_schema import AppConfig
 from cebra.integrations.sklearn.metrics import consistency_score
@@ -219,7 +219,7 @@ def run_consistency_check(
         scores, pairs, ids_runs = consistency_score(embeddings=embeddings, between="runs")
 
         mean_score = scores.mean()
-        mlflow.log_metric(f"consistency_score_{name}", mean_score, step=step)
+        wandb.log({f"consistency_score_{name}": mean_score}, step=step)
         print(f"Mean consistency score ({name}): {mean_score:.4f}")
         if name == "train":
             train_mean = mean_score
@@ -234,7 +234,7 @@ def run_consistency_check(
 
         # Figureを閉じる
         plt.close(ax.figure)
-        mlflow.log_artifact(str(plot_path), "plots")
+        wandb.save(str(plot_path))
 
     # Restore original persistent_workers setting
     cfg.cebra.persistent_workers = original_persistent

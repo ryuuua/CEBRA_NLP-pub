@@ -1,5 +1,6 @@
 import numpy as np
-import mlflow
+import wandb
+import os
 import pytest
 import sys
 from pathlib import Path
@@ -14,7 +15,7 @@ from src.config_schema import (
     EmbeddingConfig,
     CEBRAConfig,
     EvaluationConfig,
-    MLflowConfig,
+    WandBConfig,
     ConsistencyCheckConfig,
     HyperParamTuningConfig,
     VisualizationConfig,
@@ -40,7 +41,7 @@ def make_config() -> AppConfig:
             params={"batch_size": 4},
         ),
         evaluation=EvaluationConfig(test_size=0.2, random_state=0, knn_neighbors=1),
-        mlflow=MLflowConfig(experiment_name="", run_name=""),
+        wandb=WandBConfig(project="", run_name="", entity=None),
         consistency_check=ConsistencyCheckConfig(enabled=True, num_runs=2),
         hpt=HyperParamTuningConfig(),
         ddp=DDPConfig(world_size=1, rank=0, local_rank=0),
@@ -54,9 +55,8 @@ def test_consistency_check_runs_without_value_error(tmp_path):
     X_train = np.random.rand(8, 5).astype(np.float32)
     X_valid = np.random.rand(4, 5).astype(np.float32)
     y_train = np.array([0, 0, 0, 0, 1, 1, 1, 1])
-    mlflow.set_tracking_uri(tmp_path.as_posix())
-    mlflow.set_experiment("test-exp")
-    with mlflow.start_run():
+    os.environ["WANDB_MODE"] = "offline"
+    with wandb.init(project="test-exp", dir=str(tmp_path)):
         try:
             run_consistency_check(X_train, y_train, X_valid, cfg, tmp_path)
         except ValueError as exc:

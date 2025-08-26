@@ -4,7 +4,7 @@ from omegaconf import OmegaConf
 from src.config_schema import AppConfig
 from tqdm.auto import tqdm
 from collections import deque
-import mlflow
+import wandb
 
 def get_cebra_config_hash(cfg):
     import json, hashlib
@@ -278,8 +278,8 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
                         unique, counts = torch.unique(labels_device, return_counts=True)
                         if unique.numel() < 2 or torch.any(counts < 2):
                             skipped += 1
-                            if mlflow.active_run():
-                                mlflow.log_metric("skipped_batches", skipped, step=steps)
+                            if wandb.run is not None:
+                                wandb.log({"skipped_batches": skipped}, step=steps)
                             continue
     
                         batch_size = labels_device.shape[0]
@@ -297,8 +297,8 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
                         diff_counts = diff_mask.sum(dim=1)
                         if torch.any(same_counts == 0) or torch.any(diff_counts == 0):
                             skipped += 1
-                            if mlflow.active_run():
-                                mlflow.log_metric("skipped_batches", skipped, step=steps)
+                            if wandb.run is not None:
+                                wandb.log({"skipped_batches": skipped}, step=steps)
                             continue
                         pos_choice = (rand_pos * same_counts).floor().long()
                         neg_choice = (rand_neg * diff_counts).floor().long()
@@ -327,16 +327,16 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
                 optimizer.zero_grad()
                 loss.backward()
                 optimizer.step()
-                if mlflow.active_run():
-                        mlflow.log_metric("loss", loss.item(), step=steps)
+                if wandb.run is not None:
+                        wandb.log({"loss": loss.item()}, step=steps)
     
                 steps += 1
                 pbar.update(1)
                 if steps >= cfg.cebra.max_iterations:
                     break
 
-    if mlflow.active_run():
-        mlflow.log_metric("total_skipped", skipped)
+    if wandb.run is not None:
+        wandb.log({"total_skipped": skipped})
 
     # Explicitly shut down DataLoader workers to avoid process accumulation
     if cfg.cebra.num_workers > 0:
