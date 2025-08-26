@@ -118,7 +118,9 @@ def main(cfg: AppConfig) -> None:
     cebra_model = train_cebra(X_train, labels_for_training, cfg, output_dir)
     model_path = save_cebra_model(cebra_model, output_dir)
 
-    wandb.save(str(model_path))
+    model_artifact = wandb.Artifact(name=model_path.stem, type="model")
+    model_artifact.add_file(str(model_path))
+    wandb.log_artifact(model_artifact)
 
 
     # --- 5. Transform Data ---
@@ -140,10 +142,16 @@ def main(cfg: AppConfig) -> None:
         order = OmegaConf.to_container(cfg.dataset.visualization.emotion_order, resolve=True)
 
         # 可視化
-        save_interactive_plot(cebra_embeddings_full, text_labels_full, cfg.cebra.output_dim, palette, "Interactive CEBRA (Discrete)", output_dir / "cebra_interactive_discrete.html")
+        interactive_path = output_dir / "cebra_interactive_discrete.html"
+        save_interactive_plot(cebra_embeddings_full, text_labels_full, cfg.cebra.output_dim, palette, "Interactive CEBRA (Discrete)", interactive_path)
+        vis_artifact = wandb.Artifact(name=interactive_path.stem, type="evaluation")
+        vis_artifact.add_file(str(interactive_path))
+        wandb.log_artifact(vis_artifact)
         save_static_2d_plots(cebra_embeddings_full, text_labels_full, palette, "CEBRA Embeddings (Discrete)", output_dir, order)
-        
-
+        static_artifact = wandb.Artifact("cebra-static-plots", type="evaluation")
+        static_artifact.add_file(str(output_dir / "static_PCA_plot.png"))
+        static_artifact.add_file(str(output_dir / "static_UMAP_plot.png"))
+        wandb.log_artifact(static_artifact)
         # 評価
         accuracy, report = run_knn_classification(
             train_embeddings=cebra_train_embeddings, valid_embeddings=cebra_valid_embeddings,
@@ -153,7 +161,9 @@ def main(cfg: AppConfig) -> None:
         wandb.log({"knn_accuracy": accuracy})
         report_path = output_dir / "classification_report.json"
         pd.Series(report).to_json(report_path, indent=4)
-        wandb.save(str(report_path))
+        report_artifact = wandb.Artifact(name=report_path.stem, type="evaluation")
+        report_artifact.add_file(str(report_path))
+        wandb.log_artifact(report_artifact)
 
     elif cfg.cebra.conditional == 'None':
         # [None CASE]
@@ -162,12 +172,16 @@ def main(cfg: AppConfig) -> None:
         # 可視化 (Valenceスコアで色付け)
         # conditional_dataはVADのNumpy配列
         valence_scores = conditional_data[:, 0]
+        interactive_path = output_dir / "None.html"
         save_interactive_plot(
-            embeddings=cebra_embeddings_full, text_labels=valence_scores, 
+            embeddings=cebra_embeddings_full, text_labels=valence_scores,
             output_dim=cfg.cebra.output_dim, palette=None, # 連続値なのでplotlyが自動でカラースケールを適用
             title="Interactive CEBRA (None - Colored by Valence)",
-            output_path=output_dir / "None.html"
+            output_path=interactive_path
         )
+        vis_artifact = wandb.Artifact(name=interactive_path.stem, type="evaluation")
+        vis_artifact.add_file(str(interactive_path))
+        wandb.log_artifact(vis_artifact)
         # 注意: 連続値の場合、カテゴリ別の静的プロットはそのままでは適用できない
 
         # 評価
