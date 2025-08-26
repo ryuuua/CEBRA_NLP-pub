@@ -30,6 +30,19 @@ torchrun --nproc_per_node=2 main.py
 python main.py -m hpt=my_sweep
 ```
 
+### Kaggle データセットを使用する
+
+Kaggle の階層型テキスト分類データセットを利用する場合は、データを
+`data/kaggle/hierarchical-text-classification` に配置し、
+以下のようにデータセット設定を切り替えます:
+
+```bash
+python main.py dataset=hierarchical_text_classification
+```
+
+`conf/paths/default.yaml` の `kaggle_data_dir` を変更することで、データの
+保存場所をカスタマイズできます。
+
 ## Experiment Tracking
 
 This project uses [Weights & Biases](https://wandb.ai/) for experiment tracking.

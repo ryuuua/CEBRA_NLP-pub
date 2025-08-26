@@ -1,5 +1,6 @@
 # デフォルトで読み込む設定グループを指定
 defaults:
+  - paths: default
   - dataset: dair-ai
   - embedding: bert
   - cebra: cebra7dim2

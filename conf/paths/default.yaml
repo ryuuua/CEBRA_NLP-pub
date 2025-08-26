@@ -1,3 +1,5 @@
 # conf/paths/default.yaml
 
 embedding_cache_dir: "embedding_cache"
+kaggle_data_dir: "data/kaggle/hierarchical-text-classification"
+

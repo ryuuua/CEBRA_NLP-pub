@@ -11,11 +11,13 @@ class VisualizationConfig:
 @dataclass
 class DatasetConfig:
     name: str
-    hf_path: str
     text_column: str
     label_column: str
     label_map: Dict[int, str]
     visualization: VisualizationConfig
+    hf_path: Optional[str] = None
+    source: Literal["hf", "csv", "kaggle"] = "hf"
+    data_files: Optional[str] = None
 
 @dataclass
 class EmbeddingConfig:
@@ -62,6 +64,7 @@ class DDPConfig:
 @dataclass
 class PathsConfig:
     embedding_cache_dir: str
+    kaggle_data_dir: str = "data/kaggle/hierarchical-text-classification"
 
 @dataclass
 class ConsistencyCheckConfig:
