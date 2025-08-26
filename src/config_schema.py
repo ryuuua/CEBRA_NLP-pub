@@ -16,6 +16,7 @@ class DatasetConfig:
     label_column: str
     label_map: Dict[int, str]
     visualization: VisualizationConfig
+    source: str = "hf"
 
 @dataclass
 class EmbeddingConfig:

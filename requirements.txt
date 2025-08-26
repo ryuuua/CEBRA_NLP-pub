@@ -15,6 +15,7 @@ torch
 tqdm
 transformers
 umap-learn
+kagglehub
 kaleido
 optuna
 wandb
