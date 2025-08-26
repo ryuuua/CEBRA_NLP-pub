@@ -48,10 +48,10 @@ class EvaluationConfig:
     knn_neighbors: int
 
 @dataclass
-class MLflowConfig:
-    experiment_name: str
+class WandBConfig:
+    project: str
     run_name: str
-    tracking_uri: Optional[str] = None
+    entity: Optional[str] = None
 
 @dataclass
 class DDPConfig:
@@ -85,7 +85,7 @@ class AppConfig:
     embedding: EmbeddingConfig
     cebra: CEBRAConfig
     evaluation: EvaluationConfig
-    mlflow: MLflowConfig
+    wandb: WandBConfig
     consistency_check: ConsistencyCheckConfig
     hpt: HyperParamTuningConfig
     ddp: DDPConfig

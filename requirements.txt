@@ -3,7 +3,6 @@ datasets
 gensim
 hydra-core
 matplotlib
-mlflow
 numpy
 omegaconf
 pandas
@@ -18,3 +17,4 @@ transformers
 umap-learn
 kaleido
 optuna
+wandb

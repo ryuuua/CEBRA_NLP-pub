@@ -3,7 +3,7 @@ import numpy as np
 from omegaconf import OmegaConf
 import torch
 import random
-import mlflow
+import wandb
 import pandas as pd
 from pathlib import Path
 from datasets import load_dataset
@@ -44,76 +44,60 @@ def main(cfg: AppConfig) -> None:
     output_dir = Path(HydraConfig.get().run.dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    if cfg.mlflow.tracking_uri:
-        mlflow.set_tracking_uri(cfg.mlflow.tracking_uri)
-    experiment_name = f"{cfg.mlflow.experiment_name}_{cfg.dataset.name}"
-    experiment = mlflow.get_experiment_by_name(experiment_name)
-    if experiment is None:
-        mlflow.create_experiment(name=experiment_name)
-    mlflow.set_experiment(experiment_name)
     run_name = HydraConfig.get().job.name
-    with mlflow.start_run(run_name=run_name) as run:
-        run_id = run.info.run_id
-        print(f"MLflow Run Name: {run_name}, Run ID: {run_id}")
-        (output_dir / "mlflow_run_id.txt").write_text(run_id)
-        mlflow.set_tag("hydra_run_dir", str(output_dir))
-        mlflow.log_dict(OmegaConf.to_container(cfg, resolve=True), "config.yaml")
 
-        # 1. Load Dataset
-        print("\n--- Step 1: Loading dataset ---")
-        if cfg.cebra.conditional == 'None':
-            dataset_cfg = cfg.dataset
-            dataset = load_dataset(
-                path=dataset_cfg.hf_path,
-                data_files=dataset_cfg.data_files
-            )
-            df = pd.concat([pd.DataFrame(dataset[s]) for s in dataset.keys()], ignore_index=True)
-            df = df.dropna(subset=[dataset_cfg.text_column, 'V', 'A', 'D']).reset_index(drop=True)
-            vad_columns = ['V', 'A', 'D']
-            df_vad = df[vad_columns]
-            conditional_data = df_vad.to_numpy(dtype=np.float32)
-            texts = df[dataset_cfg.text_column].astype(str).tolist()
-            time_indices = np.arange(len(texts))
-        else:
-            texts, conditional_data, time_indices = load_and_prepare_dataset(cfg)
-
-        # 2. Get Text Embeddings
-        print("\n--- Step 2: Generating text embeddings ---")
-        embedding_cache_path = get_embedding_cache_path(cfg)
-        X_vectors = load_text_embedding(embedding_cache_path)
-        if X_vectors is None:
-            X_vectors = get_embeddings(texts, cfg)
-            save_text_embedding(X_vectors, embedding_cache_path)
-
-        # Data Splitting
-        print("\n--- Step 3: Splitting data ---")
-        X_train, X_valid, conditional_train, conditional_valid, time_train, time_valid = train_test_split(
-            X_vectors, conditional_data, time_indices,
-            test_size=cfg.evaluation.test_size,
-            random_state=cfg.evaluation.random_state,
-            stratify=(conditional_data if cfg.cebra.conditional == 'discrete' else None)
+    # 1. Load Dataset
+    print("\n--- Step 1: Loading dataset ---")
+    if cfg.cebra.conditional == 'None':
+        dataset_cfg = cfg.dataset
+        dataset = load_dataset(
+            path=dataset_cfg.hf_path,
+            data_files=dataset_cfg.data_files
         )
+        df = pd.concat([pd.DataFrame(dataset[s]) for s in dataset.keys()], ignore_index=True)
+        df = df.dropna(subset=[dataset_cfg.text_column, 'V', 'A', 'D']).reset_index(drop=True)
+        vad_columns = ['V', 'A', 'D']
+        df_vad = df[vad_columns]
+        conditional_data = df_vad.to_numpy(dtype=np.float32)
+        texts = df[dataset_cfg.text_column].astype(str).tolist()
+        time_indices = np.arange(len(texts))
+    else:
+        texts, conditional_data, time_indices = load_and_prepare_dataset(cfg)
 
-        labels_for_training = None if cfg.cebra.conditional == 'None' else conditional_train
+    # 2. Get Text Embeddings
+    print("\n--- Step 2: Generating text embeddings ---")
+    embedding_cache_path = get_embedding_cache_path(cfg)
+    X_vectors = load_text_embedding(embedding_cache_path)
+    if X_vectors is None:
+        X_vectors = get_embeddings(texts, cfg)
+        save_text_embedding(X_vectors, embedding_cache_path)
 
+    # Data Splitting
+    print("\n--- Step 3: Splitting data ---")
+    X_train, X_valid, conditional_train, conditional_valid, time_train, time_valid = train_test_split(
+        X_vectors, conditional_data, time_indices,
+        test_size=cfg.evaluation.test_size,
+        random_state=cfg.evaluation.random_state,
+        stratify=(conditional_data if cfg.cebra.conditional == 'discrete' else None)
+    )
 
-        results_records = []
-        step_counter = 0
-        # Loop over hyperparameters and dimensions
-        for dim in cfg.hpt.output_dims:
-            for batch_size in cfg.hpt.batch_sizes:
-                for lr in cfg.hpt.learning_rates:
-                    nested_run_name = f"dim_{dim}_bs{batch_size}_lr{lr}"
-                    with mlflow.start_run(run_name=nested_run_name, nested=True):
-                        print(f"\n=== Running pipeline for output_dim={dim}, batch_size={batch_size}, lr={lr} ===")
-                        cfg.cebra.output_dim = dim
-                        cfg.cebra.params["batch_size"] = batch_size
-                        cfg.cebra.params["learning_rate"] = lr
-                        dim_output_dir = output_dir / f"dim_{dim}_bs{batch_size}_lr{lr}"
-                        dim_output_dir.mkdir(parents=True, exist_ok=True)
-                        mlflow.log_param("output_dim", dim)
-                        mlflow.log_param("batch_size", batch_size)
-                        mlflow.log_param("learning_rate", lr)
+    labels_for_training = None if cfg.cebra.conditional == 'None' else conditional_train
+
+    results_records = []
+    step_counter = 0
+    # Loop over hyperparameters and dimensions
+    for dim in cfg.hpt.output_dims:
+        for batch_size in cfg.hpt.batch_sizes:
+            for lr in cfg.hpt.learning_rates:
+                nested_run_name = f"dim_{dim}_bs{batch_size}_lr{lr}"
+                with wandb.init(project=cfg.wandb.project, entity=cfg.wandb.entity, name=nested_run_name, group=run_name):
+                    print(f"\n=== Running pipeline for output_dim={dim}, batch_size={batch_size}, lr={lr} ===")
+                    cfg.cebra.output_dim = dim
+                    cfg.cebra.params["batch_size"] = batch_size
+                    cfg.cebra.params["learning_rate"] = lr
+                    dim_output_dir = output_dir / f"dim_{dim}_bs{batch_size}_lr{lr}"
+                    dim_output_dir.mkdir(parents=True, exist_ok=True)
+                    wandb.config.update({"output_dim": dim, "batch_size": batch_size, "learning_rate": lr})
 
                         # Train CEBRA model
                         print("\n--- Step 4: Training CEBRA model ---")
@@ -133,7 +117,7 @@ def main(cfg: AppConfig) -> None:
                             cebra_model.fit(X_train, labels_for_training)
                         model_path = dim_output_dir / "cebra_model.pt"
                         cebra_model.save(str(model_path))
-                        mlflow.log_artifact(str(model_path), f"model_dim_{dim}_bs{batch_size}_lr{lr}")
+                        wandb.save(str(model_path))
 
                         # Transform Data
                         print("\n--- Step 5: Transforming data ---")
@@ -147,7 +131,7 @@ def main(cfg: AppConfig) -> None:
                         else:
                             gof = goodness_of_fit_score(cebra_model, X_valid, conditional_valid)
                         print(f"Goodness of fit (bits): {gof:.4f}")
-                        mlflow.log_metric("goodness_of_fit_bits", gof, step=step_counter)
+                        wandb.log({"goodness_of_fit_bits": gof}, step=step_counter)
 
                         # Visualization & Evaluation
                         print("\n--- Step 6: Visualization and Evaluation ---")
@@ -173,11 +157,10 @@ def main(cfg: AppConfig) -> None:
                                 output_dir=dim_output_dir,
                                 knn_neighbors=cfg.evaluation.knn_neighbors,
                             )
-                            mlflow.log_metric("knn_accuracy", accuracy, step=step_counter)
-                            mlflow.log_dict(
-                                report,
-                                f"classification_report_dim_{dim}_bs{batch_size}_lr{lr}.json",
-                            )
+                            wandb.log({"knn_accuracy": accuracy}, step=step_counter)
+                            report_path = dim_output_dir / f"classification_report_dim_{dim}_bs{batch_size}_lr{lr}.json"
+                            pd.Series(report).to_json(report_path, indent=4)
+                            wandb.save(str(report_path))
                         elif cfg.cebra.conditional == 'None':
                             valence_scores = conditional_data[:, 0]
                             save_interactive_plot(
@@ -196,8 +179,7 @@ def main(cfg: AppConfig) -> None:
                                 output_dir=dim_output_dir,
                                 knn_neighbors=cfg.evaluation.knn_neighbors,
                             )
-                            mlflow.log_metric("knn_regression_mse", mse, step=step_counter)
-                            mlflow.log_metric("knn_regression_r2", r2, step=step_counter)
+                            wandb.log({"knn_regression_mse": mse, "knn_regression_r2": r2}, step=step_counter)
 
                         train_consistency = valid_consistency = None
                         # Consistency Check
@@ -227,15 +209,18 @@ def main(cfg: AppConfig) -> None:
             results_df = pd.DataFrame(results_records)
             results_path = output_dir / "hyperparameter_search_results.csv"
             results_df.to_csv(results_path, index=False)
-            mlflow.log_artifact(str(results_path), "metrics")
+            wandb.save(str(results_path))
             best_row = results_df.sort_values("gof", ascending=False).iloc[0]
             print(
                 f"Best GoF found for dim={best_row.output_dim}, batch_size={best_row.batch_size}, lr={best_row.learning_rate}: {best_row.gof:.4f}"
             )
-            mlflow.log_param("best_dim", int(best_row.output_dim))
-            mlflow.log_param("best_batch_size", int(best_row.batch_size))
-            mlflow.log_param("best_learning_rate", float(best_row.learning_rate))
-            mlflow.log_metric("best_gof", float(best_row.gof))
+            with wandb.init(project=cfg.wandb.project, entity=cfg.wandb.entity, name=f"{run_name}_best", group=run_name):
+                wandb.config.update({
+                    "best_dim": int(best_row.output_dim),
+                    "best_batch_size": int(best_row.batch_size),
+                    "best_learning_rate": float(best_row.learning_rate),
+                })
+                wandb.log({"best_gof": float(best_row.gof)})
 
         print("\n--- Pipeline Complete ---")
 
