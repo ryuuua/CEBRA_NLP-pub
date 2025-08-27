@@ -32,14 +32,21 @@ load_dotenv()
 def main(cfg: AppConfig) -> None:
     OmegaConf.set_struct(cfg, False)
     cfg.cebra.conditional = cfg.cebra.conditional.lower()
-    local_rank = int(os.environ["LOCAL_RANK"])
+    local_rank = int(os.environ.get("LOCAL_RANK", 0))
     cfg.ddp.world_size = int(os.environ.get("WORLD_SIZE", 1))
     cfg.ddp.rank = int(os.environ.get("RANK", 0))
     cfg.ddp.local_rank = local_rank
-    dist.init_process_group(
-        backend="nccl", rank=cfg.ddp.rank, world_size=cfg.ddp.world_size
-    )
-    torch.cuda.set_device(local_rank)
+    if cfg.ddp.world_size > 1:
+        if "RANK" not in os.environ or "LOCAL_RANK" not in os.environ:
+            print(
+                "Warning: WORLD_SIZE > 1 but RANK or LOCAL_RANK not set. "
+                "Distributed training may be misconfigured."
+            )
+        else:
+            dist.init_process_group(
+                backend="nccl", rank=cfg.ddp.rank, world_size=cfg.ddp.world_size
+            )
+            torch.cuda.set_device(local_rank)
     output_dir = Path(HydraConfig.get().run.dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
