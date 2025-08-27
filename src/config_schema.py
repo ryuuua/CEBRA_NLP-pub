@@ -92,3 +92,4 @@ class AppConfig:
     consistency_check: ConsistencyCheckConfig
     hpt: HyperParamTuningConfig
     ddp: DDPConfig
+    device: str

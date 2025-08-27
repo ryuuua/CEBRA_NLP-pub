@@ -39,7 +39,6 @@ def main(cfg: AppConfig) -> None:
     dist.init_process_group(
         backend="nccl", rank=cfg.ddp.rank, world_size=cfg.ddp.world_size
     )
-    cfg.device = f"cuda:{local_rank}"
     torch.cuda.set_device(local_rank)
     output_dir = Path(HydraConfig.get().run.dir)
     output_dir.mkdir(parents=True, exist_ok=True)

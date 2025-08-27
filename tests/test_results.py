@@ -45,8 +45,8 @@ def make_config() -> AppConfig:
         consistency_check=ConsistencyCheckConfig(enabled=True, num_runs=2),
         hpt=HyperParamTuningConfig(),
         ddp=DDPConfig(world_size=1, rank=0, local_rank=0),
+        device="cpu",
     )
-    cfg.device = "cpu"
     return cfg
 
 
