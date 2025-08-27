@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from tqdm import tqdm
 
-from src.config_schema import AppConfig  # ← この行を追加
+from src.config_schema import AppConfig
 
 from typing import TYPE_CHECKING
 

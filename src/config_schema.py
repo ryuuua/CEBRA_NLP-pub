@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional, Literal
 @dataclass
 class VisualizationConfig:
     emotion_colors: Dict[str, str]
-    emotion_order: List[str] # ← この行を追加
+    emotion_order: List[str]
 
 @dataclass
 class DatasetConfig:

@@ -1,7 +1,7 @@
 # results.py
 import matplotlib
 
-matplotlib.use("Agg")  # ← この2行をファイルの先頭に追加
+matplotlib.use("Agg")  # Use Agg backend for headless environments
 
 
 import pandas as pd
