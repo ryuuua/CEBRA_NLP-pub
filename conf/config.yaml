@@ -22,12 +22,12 @@ wandb:
   project: "CEBRA_NLP_Experiment"
   run_name: "default_run"
   entity: null
-secrets:
-  aws_access_key_id: ${oc.env:AWS_ACCESS_KEY_ID}
-  aws_secret_access_key: ${oc.env:AWS_SECRET_ACCESS_KEY}
-  endpoint_url: ${oc.env:MLFLOW_S3_ENDPOINT_URL, http://localhost:9000}
-  region: ${oc.env:AWS_DEFAULT_REGION, us-east-1}
-  s3_signature_version: ${oc.env:AWS_S3_SIGNATURE_VERSION, s3v4}
+# secrets:
+#   aws_access_key_id: ${oc.env:AWS_ACCESS_KEY_ID}
+#   aws_secret_access_key: ${oc.env:AWS_SECRET_ACCESS_KEY}
+#   endpoint_url: ${oc.env:MLFLOW_S3_ENDPOINT_URL, http://localhost:9000}
+#   region: ${oc.env:AWS_DEFAULT_REGION, us-east-1}
+#   s3_signature_version: ${oc.env:AWS_S3_SIGNATURE_VERSION, s3v4}
 ddp:
   world_size: 1
   rank: 0
