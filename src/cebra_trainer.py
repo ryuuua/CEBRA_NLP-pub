@@ -174,6 +174,29 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
             raise ValueError(
                 "`labels` must have the same number of samples as `X_vectors`"
             )
+
+        if loss_type == "mse":
+            if labels.ndim == 1:
+                if not np.issubdtype(labels.dtype, np.integer):
+                    raise ValueError(
+                        "MSE loss with 1D labels expects integer class indices"
+                    )
+                num_classes = int(labels.max()) + 1
+                if num_classes != cfg.cebra.output_dim:
+                    raise ValueError(
+                        "MSE loss with integer labels requires "
+                        f"cfg.cebra.output_dim={num_classes}, got {cfg.cebra.output_dim}"
+                    )
+                labels = np.eye(cfg.cebra.output_dim, dtype=np.float32)[labels]
+            elif labels.ndim == 2:
+                if labels.shape[1] != cfg.cebra.output_dim:
+                    raise ValueError(
+                        "MSE loss requires label vectors with dimension "
+                        f"{cfg.cebra.output_dim}, got {labels.shape[1]}"
+                    )
+            else:
+                raise ValueError("`labels` must be 1D or 2D for MSE loss")
+            labels = labels.astype(np.float32)
     elif loss_type == "mse" or cfg.cebra.conditional != "none":
         raise ValueError("`labels` are required for the selected training configuration")
 
@@ -181,7 +204,11 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
 
     tensors = [torch.as_tensor(X_vectors, dtype=torch.float32)]
     if labels is not None:
-        dtype = torch.long if cfg.cebra.conditional == "discrete" else torch.float32
+        dtype = (
+            torch.float32
+            if loss_type == "mse"
+            else (torch.long if cfg.cebra.conditional == "discrete" else torch.float32)
+        )
         tensors.append(torch.as_tensor(labels, dtype=dtype))
     dataset = TensorDataset(*tensors)
     sampler = DistributedSampler(
