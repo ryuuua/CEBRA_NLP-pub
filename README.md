@@ -43,48 +43,13 @@ python main.py dataset=hierarchical_text_classification
 `conf/paths/default.yaml` の `kaggle_data_dir` を変更することで、データの
 保存場所をカスタマイズできます。
 
-### MSE Loss Targets
 
-MSE 損失を使用する場合、ラベルは `cebra.output_dim` と同じ次元を持つ
-ベクトルである必要があります。整数ラベルを与えた場合は自動的に
-ワンホットベクトルに変換されますが、次元が一致しない場合はエラーと
-なります。
+## Conditional Modes
 
-## Experiment Tracking
+`cebra.conditional` はラベルの条件付け方法を指定します。利用可能なモードは以下のとおりです。
 
-This project uses [Weights & Biases](https://wandb.ai/) for experiment tracking.
-Configure your project, run name, and optional entity in `conf/config.yaml`
-under the `wandb` section. Runs are initialized automatically by the
-training scripts and metrics, parameters, and artifacts are logged to W&B.
+- `none`: 条件付けなし
+- `discrete`: 離散ラベルを使用
+- `custom`: 任意の条件データを使用
 
-複数ランを同じグループにまとめるには `group` 引数を設定します:
 
-```python
-from hydra.core.hydra_config import HydraConfig
-run = wandb.init(
-    project=cfg.wandb.project,
-    entity=cfg.wandb.entity,
-    name=HydraConfig.get().job.name,
-    group=HydraConfig.get().job.name,
-    config=OmegaConf.to_container(cfg, resolve=True),
-)
-```
-
-実験結果のファイルを W&B の Artifact として保存する例:
-
-```python
-artifact = wandb.Artifact("results", type="analysis")
-artifact.add_dir(output_dir)
-run.log_artifact(artifact)
-```
-
-W&B 上で結果を確認する手順:
-
-1. 上記のように Artifact をログする。
-2. [W&B](https://wandb.ai/) にアクセスし、対象の run または group を開く。
-3. `Artifacts` タブでアップロードされたファイルを確認できる。
-4. `Group` でまとめた複数 run の結果を比較できる。
-
-## Reproducibility
-
-`evaluation.random_state` で指定した値を用いて Python の `random`、NumPy、PyTorch (CUDA が利用可能な場合は `torch.cuda` も含む) の乱数シードを設定し、結果の再現性を高めています。
