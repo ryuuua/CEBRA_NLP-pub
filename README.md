@@ -47,8 +47,9 @@ python main.py dataset=hierarchical_text_classification
 
 MSE 損失を使用する場合、ラベルは `cebra.output_dim` と同じ次元を持つ
 ベクトルである必要があります。整数ラベルを与えた場合は自動的に
-ワンホットベクトルに変換されますが、次元が一致しない場合はエラーと
-なります。
+ワンホットベクトルに変換されます。ラベルの最大値からクラス数を自動
+推定し (`num_classes = int(labels.max()) + 1`)、`cebra.output_dim` が一致
+しない場合は警告とともにこの値に更新されます。
 
 ## Experiment Tracking
 
