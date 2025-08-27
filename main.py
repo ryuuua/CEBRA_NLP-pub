@@ -31,6 +31,7 @@ load_dotenv()
 @hydra.main(config_path="conf", config_name="config", version_base="1.2")
 def main(cfg: AppConfig) -> None:
     OmegaConf.set_struct(cfg, False)
+    cfg.cebra.conditional = cfg.cebra.conditional.lower()
     local_rank = int(os.environ["LOCAL_RANK"])
     cfg.ddp.world_size = int(os.environ.get("WORLD_SIZE", 1))
     cfg.ddp.rank = int(os.environ.get("RANK", 0))
@@ -69,7 +70,7 @@ def main(cfg: AppConfig) -> None:
     # --- 1. Load Dataset ---
     print("\n--- Step 1: Loading dataset ---")
     # 'conditional_data' という変数名に統一
-    if cfg.cebra.conditional == 'None':
+    if cfg.cebra.conditional == 'none':
         dataset_cfg = cfg.dataset
         # データセットのソースに応じて読み込み
         source = getattr(dataset_cfg, "source", "hf")
@@ -118,7 +119,7 @@ def main(cfg: AppConfig) -> None:
     print("\n--- Step 4: Training CEBRA model ---")
 
     labels_for_training = (
-        None if cfg.cebra.conditional == "None" else conditional_train
+        None if cfg.cebra.conditional == "none" else conditional_train
     )
     cebra_model = train_cebra(X_train, labels_for_training, cfg, output_dir)
     model_path = save_cebra_model(cebra_model, output_dir)
@@ -170,7 +171,7 @@ def main(cfg: AppConfig) -> None:
         report_artifact.add_file(str(report_path))
         wandb.log_artifact(report_artifact)
 
-    elif cfg.cebra.conditional == 'None':
+    elif cfg.cebra.conditional == 'none':
         # [None CASE]
         print("Running None evaluation and visualization...")
         

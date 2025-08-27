@@ -43,6 +43,16 @@ python main.py dataset=hierarchical_text_classification
 `conf/paths/default.yaml` の `kaggle_data_dir` を変更することで、データの
 保存場所をカスタマイズできます。
 
+## Conditional Modes
+
+`cebra.conditional` はラベルの条件付け方法を指定します。利用可能なモードは以下のとおりです。
+
+- `none`: 条件付けなし
+- `discrete`: 離散ラベルを使用
+- `custom`: 任意の条件データを使用
+
+値は大文字小文字を区別しません。
+
 ## Experiment Tracking
 
 This project uses [Weights & Biases](https://wandb.ai/) for experiment tracking.

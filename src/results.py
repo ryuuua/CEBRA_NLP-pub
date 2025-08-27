@@ -188,7 +188,7 @@ def run_consistency_check(
             max_iterations=cfg.cebra.max_iterations,
             batch_size=cfg.cebra.params.get("batch_size", 512),
             learning_rate=cfg.cebra.params.get("learning_rate", 1e-3),
-            conditional=None if cfg.cebra.conditional == "None" else cfg.cebra.conditional,
+            conditional=None if cfg.cebra.conditional == "none" else cfg.cebra.conditional,
             device=cfg.device,
         )
         if y_train is None:

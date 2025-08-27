@@ -159,6 +159,7 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
     from torch.utils.data import DataLoader, TensorDataset, DistributedSampler
     import inspect
 
+    cfg.cebra.conditional = cfg.cebra.conditional.lower()
     loss_type = cfg.cebra.params.get("loss", "infonce").lower()
 
     if X_vectors is None:
