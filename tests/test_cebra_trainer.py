@@ -105,8 +105,8 @@ def test_mse_integer_labels_output_dim_mismatch():
     cfg = make_config(batch_size=4, loss="mse")
     X = np.random.rand(4, 5).astype(np.float32)
     y = np.array([0, 1, 2, 1])
-    with pytest.raises(ValueError):
-        train_cebra(X, y, cfg, Path("."))
+    train_cebra(X, y, cfg, Path("."))
+    assert cfg.cebra.output_dim == 3
 
 
 def test_classifier_model_tuple_output(monkeypatch):

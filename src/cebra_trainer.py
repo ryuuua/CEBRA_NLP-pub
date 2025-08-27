@@ -5,6 +5,7 @@ from src.config_schema import AppConfig
 from tqdm.auto import tqdm
 from collections import deque
 import wandb
+import warnings
 
 def get_cebra_config_hash(cfg):
     import json, hashlib
@@ -184,17 +185,20 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
                     )
                 num_classes = int(labels.max()) + 1
                 if num_classes != cfg.cebra.output_dim:
-                    raise ValueError(
-                        "MSE loss with integer labels requires "
-                        f"cfg.cebra.output_dim={num_classes}, got {cfg.cebra.output_dim}"
+                    warnings.warn(
+                        "Adjusting cfg.cebra.output_dim from "
+                        f"{cfg.cebra.output_dim} to {num_classes} based on labels"
                     )
+                    cfg.cebra.output_dim = num_classes
                 labels = np.eye(cfg.cebra.output_dim, dtype=np.float32)[labels]
             elif labels.ndim == 2:
-                if labels.shape[1] != cfg.cebra.output_dim:
-                    raise ValueError(
-                        "MSE loss requires label vectors with dimension "
-                        f"{cfg.cebra.output_dim}, got {labels.shape[1]}"
+                num_classes = labels.shape[1]
+                if num_classes != cfg.cebra.output_dim:
+                    warnings.warn(
+                        "Adjusting cfg.cebra.output_dim from "
+                        f"{cfg.cebra.output_dim} to {num_classes} based on labels"
                     )
+                    cfg.cebra.output_dim = num_classes
             else:
                 raise ValueError("`labels` must be 1D or 2D for MSE loss")
             labels = labels.astype(np.float32)
