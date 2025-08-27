@@ -7,7 +7,7 @@ from src.config_schema import AppConfig  # ← この行を追加
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from src.config_schema import AppConfi
+    from src.config_schema import AppConfig
 
 def get_hf_transformer_embeddings(texts, model_name, device):
     """Generates embeddings using a standard Hugging Face Transformer (BERT, RoBERTa)."""
