@@ -7,7 +7,7 @@ model_architecture: offset1-model
 # CEBRA-specific parameters
 output_dim: 3
 max_iterations: 10000
-conditional: 'None'
+conditional: 'none'
 # Nested parameters for the model
 params:
   batch_size: 512
