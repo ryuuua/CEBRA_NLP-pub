@@ -16,7 +16,7 @@ class DatasetConfig:
     label_map: Dict[int, str]
     visualization: VisualizationConfig
     hf_path: Optional[str] = None
-    source: Literal["hf", "csv", "kaggle"] = "hf"
+    source: Optional[Literal["hf", "csv", "kaggle"]] = "hf"
     data_files: Optional[str] = None
 
 @dataclass
