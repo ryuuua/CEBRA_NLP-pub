@@ -43,6 +43,13 @@ python main.py dataset=hierarchical_text_classification
 `conf/paths/default.yaml` の `kaggle_data_dir` を変更することで、データの
 保存場所をカスタマイズできます。
 
+### MSE Loss Targets
+
+MSE 損失を使用する場合、ラベルは `cebra.output_dim` と同じ次元を持つ
+ベクトルである必要があります。整数ラベルを与えた場合は自動的に
+ワンホットベクトルに変換されますが、次元が一致しない場合はエラーと
+なります。
+
 ## Experiment Tracking
 
 This project uses [Weights & Biases](https://wandb.ai/) for experiment tracking.
