@@ -71,12 +71,17 @@ def main(cfg: AppConfig) -> None:
     # 'conditional_data' という変数名に統一
     if cfg.cebra.conditional == 'None':
         dataset_cfg = cfg.dataset
-
-        # ローカルCSV読み込み
-        dataset = load_dataset(
-            path=dataset_cfg.hf_path,
-            data_files=dataset_cfg.data_files
-        )
+        # データセットのソースに応じて読み込み
+        source = getattr(dataset_cfg, "source", "hf")
+        if source == "hf":
+            dataset = load_dataset(dataset_cfg.hf_path)
+        elif source == "csv":
+            dataset = load_dataset("csv", data_files=dataset_cfg.data_files)
+        elif source == "kaggle":
+            kaggle_path = Path(cfg.paths.kaggle_data_dir) / dataset_cfg.data_files
+            dataset = load_dataset("csv", data_files=str(kaggle_path))
+        else:
+            raise ValueError(f"Unsupported dataset source: {source}")
         df = pd.concat([pd.DataFrame(dataset[s]) for s in dataset.keys()], ignore_index=True)
 
         # --- VAD列を直接使用 ---
