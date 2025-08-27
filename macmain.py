@@ -140,10 +140,20 @@ def main(cfg: AppConfig) -> None:
 
         # 可視化
         interactive_path = output_dir / "cebra_interactive_discrete.html"
-        save_interactive_plot(cebra_embeddings_full, text_labels_full, cfg.cebra.output_dim, palette, "Interactive CEBRA (Discrete)", interactive_path)
-        vis_artifact = wandb.Artifact(name=interactive_path.stem, type="evaluation")
-        vis_artifact.add_file(str(interactive_path))
-        wandb.log_artifact(vis_artifact)
+        save_interactive_plot(
+            cebra_embeddings_full,
+            text_labels_full,
+            cfg.cebra.output_dim,
+            palette,
+            "Interactive CEBRA (Discrete)",
+            interactive_path,
+        )
+        if interactive_path.exists():
+            vis_artifact = wandb.Artifact(
+                name=interactive_path.stem, type="evaluation"
+            )
+            vis_artifact.add_file(str(interactive_path))
+            wandb.log_artifact(vis_artifact)
         save_static_2d_plots(cebra_embeddings_full, text_labels_full, palette, "CEBRA Embeddings (Discrete)", output_dir, order)
         static_artifact = wandb.Artifact("cebra-static-plots", type="evaluation")
         static_artifact.add_file(str(output_dir / "static_PCA_plot.png"))
@@ -176,9 +186,12 @@ def main(cfg: AppConfig) -> None:
             title="Interactive CEBRA (None - Colored by Valence)",
             output_path=interactive_path
         )
-        vis_artifact = wandb.Artifact(name=interactive_path.stem, type="evaluation")
-        vis_artifact.add_file(str(interactive_path))
-        wandb.log_artifact(vis_artifact)
+        if interactive_path.exists():
+            vis_artifact = wandb.Artifact(
+                name=interactive_path.stem, type="evaluation"
+            )
+            vis_artifact.add_file(str(interactive_path))
+            wandb.log_artifact(vis_artifact)
         # 注意: 連続値の場合、カテゴリ別の静的プロットはそのままでは適用できない
 
         # 評価
