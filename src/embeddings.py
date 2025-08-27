@@ -1,8 +1,13 @@
 import numpy as np
 import torch
 from tqdm import tqdm
+
 from src.config_schema import AppConfig  # ← この行を追加
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from src.config_schema import AppConfi
 
 def get_hf_transformer_embeddings(texts, model_name, device):
     """Generates embeddings using a standard Hugging Face Transformer (BERT, RoBERTa)."""
@@ -69,6 +74,7 @@ def get_word2vec_embeddings(texts, w2v_params):
 
 
 def get_embeddings(texts: list, cfg: AppConfig) -> np.ndarray:
+
     """Factory function to select and run the appropriate embedding model."""
     emb_cfg = cfg.embedding
     print(f"\n--- Generating embeddings using model: {emb_cfg.name} ---")

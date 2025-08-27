@@ -8,6 +8,8 @@ defaults:
   - hpt: default
   - _self_
 
+device: ${oc.env:DEVICE, cpu}
+
 hydra:
   run:
 

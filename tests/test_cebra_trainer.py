@@ -45,8 +45,8 @@ def make_config(batch_size: int, loss: str = "infonce") -> AppConfig:
         consistency_check=ConsistencyCheckConfig(),
         hpt=HyperParamTuningConfig(),
         ddp=DDPConfig(world_size=1, rank=0, local_rank=0),
+        device="cpu",
     )
-    cfg.device = "cpu"
     return cfg
 
 
@@ -91,6 +91,22 @@ def test_train_mse_loss():
     X = np.random.rand(4, 5).astype(np.float32)
     y = np.random.rand(4, cfg.cebra.output_dim).astype(np.float32)
     train_cebra(X, y, cfg, Path("."))
+
+
+def test_mse_integer_labels_auto_one_hot():
+    cfg = make_config(batch_size=4, loss="mse")
+    cfg.cebra.output_dim = 3
+    X = np.random.rand(4, 5).astype(np.float32)
+    y = np.array([0, 1, 2, 1])
+    train_cebra(X, y, cfg, Path("."))
+
+
+def test_mse_integer_labels_output_dim_mismatch():
+    cfg = make_config(batch_size=4, loss="mse")
+    X = np.random.rand(4, 5).astype(np.float32)
+    y = np.array([0, 1, 2, 1])
+    with pytest.raises(ValueError):
+        train_cebra(X, y, cfg, Path("."))
 
 
 def test_classifier_model_tuple_output(monkeypatch):
