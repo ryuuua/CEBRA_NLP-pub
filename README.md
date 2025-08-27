@@ -43,6 +43,36 @@ python main.py dataset=hierarchical_text_classification
 `conf/paths/default.yaml` の `kaggle_data_dir` を変更することで、データの
 保存場所をカスタマイズできます。
 
+### MSE Loss Targets
+
+MSE 損失を使用する場合、ラベルは `cebra.output_dim` と同じ次元を持つ
+ベクトルである必要があります。整数ラベルを与えた場合は自動的に
+ワンホットベクトルに変換されますが、次元が一致しない場合はエラーと
+なります。
+
+## Experiment Tracking
+
+This project uses [Weights & Biases](https://wandb.ai/) for experiment tracking.
+Configure your project, run name, and optional entity in `conf/config.yaml`
+under the `wandb` section. Runs are initialized automatically by the
+training scripts and metrics, parameters, and artifacts are logged to W&B.
+
+複数ランを同じグループにまとめるには `group` 引数を設定します:
+
+```python
+from hydra.core.hydra_config import HydraConfig
+run = wandb.init(
+    project=cfg.wandb.project,
+    entity=cfg.wandb.entity,
+    name=HydraConfig.get().job.name,
+    group=HydraConfig.get().job.name,
+    config=OmegaConf.to_container(cfg, resolve=True),
+)
+```
+
+実験結果のファイルを W&B の Artifact として保存する例:
+=======
+
 
 ## Conditional Modes
 
