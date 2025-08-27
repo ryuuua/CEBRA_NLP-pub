@@ -1,6 +1,7 @@
 # @package dataset
 
 name: go_emotions
+source: hf
 hf_path: "go_emotions"
 text_column: "text"
 label_column: "labels"
