@@ -5,7 +5,7 @@ defaults:
   - embedding: bert
   - cebra: offset1-model-mse
   - consistency_check: default
-  - hpt: default
+  - hpt: my_sweep
   - _self_
 
 device: ${oc.env:DEVICE, cpu}
