@@ -227,6 +227,7 @@ def run_consistency_check(
     cfg: AppConfig,
     output_dir: Path,
     y_valid=None,
+    enable_plots=True,
     step: int | None = None,
 ):
 
@@ -291,15 +292,16 @@ def run_consistency_check(
         else:
             valid_mean = mean_score
 
-        ax = plot_consistency(scores, pairs, ids_runs)
-        plot_path = output_dir / f"consistency_plot_{name}.png"
+        if enable_plots:
+            ax = plot_consistency(scores, pairs, ids_runs)
+            plot_path = output_dir / f"consistency_plot_{name}.png"
 
-        # Axesオブジェクト(ax)の親であるFigureオブジェクト(ax.figure)に対してsavefigを実行
-        ax.figure.savefig(plot_path)
+            # Axesオブジェクト(ax)の親であるFigureオブジェクト(ax.figure)に対してsavefigを実行
+            ax.figure.savefig(plot_path)
 
-        # Figureを閉じる
-        plt.close(ax.figure)
-        wandb.save(str(plot_path))
+            # Figureを閉じる
+            plt.close(ax.figure)
+            wandb.save(str(plot_path))
 
     # Restore original persistent_workers setting
     cfg.cebra.persistent_workers = original_persistent
