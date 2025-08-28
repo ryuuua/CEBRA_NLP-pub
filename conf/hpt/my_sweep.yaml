@@ -1,9 +1,7 @@
 # conf/hpt/my_sweep.yaml
-
-# Hydra多重実行の設定
 hydra:
- mode: MULTIRUN
- sweeper:
+  mode: MULTIRUN
+  sweeper:
     _target_: hydra._internal.core_plugins.basic_sweeper.BasicSweeper
     params:
       dataset: dair-ai,go_emotions
