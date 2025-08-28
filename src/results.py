@@ -152,7 +152,9 @@ def run_knn_classification(
     label_map,
     output_dir: Path,
     knn_neighbors,
-    enable_plots=True,
+
+    enable_plots: bool = True,
+
 ):
     """k-NN classification for discrete labels."""
     print("\nRunning k-NN Classification evaluation...")
@@ -231,6 +233,7 @@ def run_consistency_check(
     y_valid=None,
     enable_plots=True,
     step: int | None = None,
+    enable_plots: bool = True,
 ):
 
     print("\n--- Step 6: Running Consistency Check ---")
