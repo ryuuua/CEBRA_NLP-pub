@@ -231,9 +231,8 @@ def run_consistency_check(
     cfg: AppConfig,
     output_dir: Path,
     y_valid=None,
-    enable_plots=True,
-    step: int | None = None,
     enable_plots: bool = True,
+    step: int | None = None,
 ):
 
     print("\n--- Step 6: Running Consistency Check ---")
