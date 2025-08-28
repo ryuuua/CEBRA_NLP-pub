@@ -47,6 +47,11 @@ def main(cfg: AppConfig) -> None:
                 backend="nccl", rank=cfg.ddp.rank, world_size=cfg.ddp.world_size
             )
             torch.cuda.set_device(local_rank)
+            if torch.cuda.is_available():
+                cfg.device = f"cuda:{local_rank}"
+    else:
+        if torch.cuda.is_available():
+            cfg.device = "cuda"
     output_dir = Path(HydraConfig.get().run.dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
