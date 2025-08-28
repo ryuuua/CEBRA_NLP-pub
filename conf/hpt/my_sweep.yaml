@@ -10,8 +10,12 @@ hydra:
 
       # 例1: emotionデータセットとbert/roberta埋め込みの組み合わせ
       # output_dimを8または16で試す
-      - dataset: dair-ai
-        embedding: bert
+      - dataset: dair-ai,go_emotions
+        embedding: bert,roberta,sentence_bert
+        cebra: offset1-model-mse,offset1-model-v4,supervised1-model
         cebra:
-          output_dim: 8
-
+          output_dim: 2,3,4,5,6,7,8,9,10,11,12,13,14
+          max_iterations: 15000
+          params:
+            batch_size: 512,1024
+            learning_rate: 3e-4,1e-4 # Higher learning rate
