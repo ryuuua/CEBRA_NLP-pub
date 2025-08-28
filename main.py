@@ -36,6 +36,7 @@ def main(cfg: AppConfig) -> None:
     cfg.ddp.world_size = int(os.environ.get("WORLD_SIZE", 1))
     cfg.ddp.rank = int(os.environ.get("RANK", 0))
     cfg.ddp.local_rank = local_rank
+    is_main_process = cfg.ddp.rank == 0
     if cfg.ddp.world_size > 1:
         if "RANK" not in os.environ or "LOCAL_RANK" not in os.environ:
             print(
@@ -47,6 +48,11 @@ def main(cfg: AppConfig) -> None:
                 backend="nccl", rank=cfg.ddp.rank, world_size=cfg.ddp.world_size
             )
             torch.cuda.set_device(local_rank)
+            if torch.cuda.is_available():
+                cfg.device = f"cuda:{local_rank}"
+    else:
+        if torch.cuda.is_available():
+            cfg.device = "cuda"
     output_dir = Path(HydraConfig.get().run.dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     try:
@@ -131,11 +137,11 @@ def main(cfg: AppConfig) -> None:
         cebra_model = train_cebra(X_train, labels_for_training, cfg, output_dir)
         model_path = save_cebra_model(cebra_model, output_dir)
 
+
         model_artifact = wandb.Artifact(name=model_path.stem, type="model")
         model_artifact.add_file(str(model_path))
         wandb.log_artifact(model_artifact)
-
-
+        
         # --- 5. Transform Data ---
         print("\n--- Step 5: Transforming data with trained CEBRA model ---")
         cebra_embeddings_full = transform_cebra(cebra_model, X_vectors, cfg.device)
@@ -172,10 +178,12 @@ def main(cfg: AppConfig) -> None:
                     vis_artifact.add_file(str(interactive_path))
                     wandb.log_artifact(vis_artifact)
                 save_static_2d_plots(cebra_embeddings_full, text_labels_full, palette, "CEBRA Embeddings (Discrete)", output_dir, order)
+
                 static_artifact = wandb.Artifact("cebra-static-plots", type="evaluation")
                 static_artifact.add_file(str(output_dir / "static_PCA_plot.png"))
                 static_artifact.add_file(str(output_dir / "static_UMAP_plot.png"))
                 wandb.log_artifact(static_artifact)
+
             # 評価
             accuracy, report = run_knn_classification(
                 train_embeddings=cebra_train_embeddings, valid_embeddings=cebra_valid_embeddings,
@@ -235,6 +243,7 @@ def main(cfg: AppConfig) -> None:
     finally:
         if cfg.ddp.world_size > 1 and dist.is_initialized():
             dist.destroy_process_group()
+
 
     print("\n--- Pipeline Complete ---")
 
