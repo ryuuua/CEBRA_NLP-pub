@@ -272,9 +272,11 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
     steps = 0
     skipped = 0
     ma = deque(maxlen=50)
+    epoch = 0
 
     with tqdm(total=cfg.cebra.max_iterations, desc="CEBRA Training") as pbar:
         while steps < cfg.cebra.max_iterations:
+            sampler.set_epoch(epoch)
             for batch in loader:
                 if loss_type == "mse":
                     batch_x, batch_y = batch
@@ -361,11 +363,12 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
                 optimizer.step()
                 if wandb.run is not None:
                         wandb.log({"loss": loss.item()}, step=steps)
-    
+
                 steps += 1
                 pbar.update(1)
                 if steps >= cfg.cebra.max_iterations:
                     break
+            epoch += 1
 
     if wandb.run is not None:
         wandb.log({"total_skipped": skipped})
