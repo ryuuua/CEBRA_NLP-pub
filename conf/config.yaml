@@ -1,11 +1,11 @@
 # デフォルトで読み込む設定グループを指定
 defaults:
+  - hpt: default
   - paths: default
   - dataset: dair-ai
   - embedding: bert
   - cebra: cebra7dim2
   - consistency_check: default
-  - hpt: default
   - _self_
 
 device: ${oc.env:DEVICE, cpu}
