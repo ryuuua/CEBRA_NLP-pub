@@ -2,6 +2,7 @@
 
 # Hydra多重実行の設定
 hydra:
+ mode: MULTIRUN
  sweeper:
     _target_: hydra._internal.core_plugins.basic_sweeper.BasicSweeper
     params:
