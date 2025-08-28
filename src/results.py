@@ -152,6 +152,7 @@ def run_knn_classification(
     label_map,
     output_dir: Path,
     knn_neighbors,
+    enable_plots=True,
 ):
     """k-NN classification for discrete labels."""
     print("\nRunning k-NN Classification evaluation...")
@@ -171,22 +172,23 @@ def run_knn_classification(
     print(f"k-NN Accuracy on Validation Set: {accuracy:.4f}")
 
     # --- Confusion Matrix ---
-    cm_plot_file = output_dir / "confusion_matrix.png"
-    fig, ax = plt.subplots(figsize=(10, 8))
-    ConfusionMatrixDisplay.from_estimator(
-        knn,
-        valid_embeddings,
-        y_valid,
-        display_labels=list(label_map.values()),
-        cmap=plt.cm.Blues,
-        ax=ax,
-        xticks_rotation="vertical",
-    )
-    ax.set_title(f"Confusion Matrix (k-NN={knn_neighbors})")
-    plt.tight_layout()
-    plt.savefig(cm_plot_file)
-    plt.close(fig)
-    print(f"Saved confusion matrix to {cm_plot_file}")
+    if enable_plots:
+        cm_plot_file = output_dir / "confusion_matrix.png"
+        fig, ax = plt.subplots(figsize=(10, 8))
+        ConfusionMatrixDisplay.from_estimator(
+            knn,
+            valid_embeddings,
+            y_valid,
+            display_labels=list(label_map.values()),
+            cmap=plt.cm.Blues,
+            ax=ax,
+            xticks_rotation="vertical",
+        )
+        ax.set_title(f"Confusion Matrix (k-NN={knn_neighbors})")
+        plt.tight_layout()
+        plt.savefig(cm_plot_file)
+        plt.close(fig)
+        print(f"Saved confusion matrix to {cm_plot_file}")
 
     return accuracy, report
 
