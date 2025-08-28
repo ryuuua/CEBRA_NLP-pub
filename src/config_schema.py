@@ -48,6 +48,7 @@ class EvaluationConfig:
     test_size: float
     random_state: int
     knn_neighbors: int
+    enable_plots: bool = True
 
 @dataclass
 class WandBConfig:
