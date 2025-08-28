@@ -4,7 +4,7 @@ defaults:
   - paths: default
   - dataset: dair-ai
   - embedding: bert
-  - cebra: cebra7dim2
+  - cebra: offset1-model-mse
   - consistency_check: default
   - _self_
 

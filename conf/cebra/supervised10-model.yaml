@@ -6,7 +6,7 @@ model_architecture: supervised10-model
 
 # CEBRA-specific parameters
 output_dim: 2
-max_iterations: 10000
+max_iterations: 15000
 conditional: 'discrete'
 num_workers: 2
 pin_memory: true

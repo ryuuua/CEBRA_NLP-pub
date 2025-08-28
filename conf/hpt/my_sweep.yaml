@@ -6,7 +6,7 @@ hydra:
  sweeper:
     _target_: hydra._internal.core_plugins.basic_sweeper.BasicSweeper
     params:
-      dataset: dair-ai,goemotio,go_emotions
+      dataset: dair-ai,go_emotions
       embedding: bert,roberta,sentence_bert
       cebra: offset1-model-mse,offset1-model-v4,supervised1-model
       cebra.output_dim: 2,3,4,5,6,7,8,9,10,11,12,13,14
