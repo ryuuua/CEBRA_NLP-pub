@@ -152,6 +152,7 @@ def run_knn_classification(
     label_map,
     output_dir: Path,
     knn_neighbors,
+    enable_plots: bool = True,
 ):
     """k-NN classification for discrete labels."""
     print("\nRunning k-NN Classification evaluation...")
@@ -171,22 +172,23 @@ def run_knn_classification(
     print(f"k-NN Accuracy on Validation Set: {accuracy:.4f}")
 
     # --- Confusion Matrix ---
-    cm_plot_file = output_dir / "confusion_matrix.png"
-    fig, ax = plt.subplots(figsize=(10, 8))
-    ConfusionMatrixDisplay.from_estimator(
-        knn,
-        valid_embeddings,
-        y_valid,
-        display_labels=list(label_map.values()),
-        cmap=plt.cm.Blues,
-        ax=ax,
-        xticks_rotation="vertical",
-    )
-    ax.set_title(f"Confusion Matrix (k-NN={knn_neighbors})")
-    plt.tight_layout()
-    plt.savefig(cm_plot_file)
-    plt.close(fig)
-    print(f"Saved confusion matrix to {cm_plot_file}")
+    if enable_plots:
+        cm_plot_file = output_dir / "confusion_matrix.png"
+        fig, ax = plt.subplots(figsize=(10, 8))
+        ConfusionMatrixDisplay.from_estimator(
+            knn,
+            valid_embeddings,
+            y_valid,
+            display_labels=list(label_map.values()),
+            cmap=plt.cm.Blues,
+            ax=ax,
+            xticks_rotation="vertical",
+        )
+        ax.set_title(f"Confusion Matrix (k-NN={knn_neighbors})")
+        plt.tight_layout()
+        plt.savefig(cm_plot_file)
+        plt.close(fig)
+        print(f"Saved confusion matrix to {cm_plot_file}")
 
     return accuracy, report
 
@@ -228,6 +230,7 @@ def run_consistency_check(
     output_dir: Path,
     y_valid=None,
     step: int | None = None,
+    enable_plots: bool = True,
 ):
 
     print("\n--- Step 6: Running Consistency Check ---")
@@ -291,15 +294,16 @@ def run_consistency_check(
         else:
             valid_mean = mean_score
 
-        ax = plot_consistency(scores, pairs, ids_runs)
-        plot_path = output_dir / f"consistency_plot_{name}.png"
+        if enable_plots:
+            ax = plot_consistency(scores, pairs, ids_runs)
+            plot_path = output_dir / f"consistency_plot_{name}.png"
 
-        # Axesオブジェクト(ax)の親であるFigureオブジェクト(ax.figure)に対してsavefigを実行
-        ax.figure.savefig(plot_path)
+            # Axesオブジェクト(ax)の親であるFigureオブジェクト(ax.figure)に対してsavefigを実行
+            ax.figure.savefig(plot_path)
 
-        # Figureを閉じる
-        plt.close(ax.figure)
-        wandb.save(str(plot_path))
+            # Figureを閉じる
+            plt.close(ax.figure)
+            wandb.save(str(plot_path))
 
     # Restore original persistent_workers setting
     cfg.cebra.persistent_workers = original_persistent

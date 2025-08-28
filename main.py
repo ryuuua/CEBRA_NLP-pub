@@ -154,31 +154,33 @@ def main(cfg: AppConfig) -> None:
         order = OmegaConf.to_container(cfg.dataset.visualization.emotion_order, resolve=True)
 
         # 可視化
-        interactive_path = output_dir / "cebra_interactive_discrete.html"
-        save_interactive_plot(
-            cebra_embeddings_full,
-            text_labels_full,
-            cfg.cebra.output_dim,
-            palette,
-            "Interactive CEBRA (Discrete)",
-            interactive_path,
-        )
-        if interactive_path.exists():
-            vis_artifact = wandb.Artifact(
-                name=interactive_path.stem, type="evaluation"
+        if cfg.evaluation.enable_plots:
+            interactive_path = output_dir / "cebra_interactive_discrete.html"
+            save_interactive_plot(
+                cebra_embeddings_full,
+                text_labels_full,
+                cfg.cebra.output_dim,
+                palette,
+                "Interactive CEBRA (Discrete)",
+                interactive_path,
             )
-            vis_artifact.add_file(str(interactive_path))
-            wandb.log_artifact(vis_artifact)
-        save_static_2d_plots(cebra_embeddings_full, text_labels_full, palette, "CEBRA Embeddings (Discrete)", output_dir, order)
-        static_artifact = wandb.Artifact("cebra-static-plots", type="evaluation")
-        static_artifact.add_file(str(output_dir / "static_PCA_plot.png"))
-        static_artifact.add_file(str(output_dir / "static_UMAP_plot.png"))
-        wandb.log_artifact(static_artifact)
+            if interactive_path.exists():
+                vis_artifact = wandb.Artifact(
+                    name=interactive_path.stem, type="evaluation"
+                )
+                vis_artifact.add_file(str(interactive_path))
+                wandb.log_artifact(vis_artifact)
+            save_static_2d_plots(cebra_embeddings_full, text_labels_full, palette, "CEBRA Embeddings (Discrete)", output_dir, order)
+            static_artifact = wandb.Artifact("cebra-static-plots", type="evaluation")
+            static_artifact.add_file(str(output_dir / "static_PCA_plot.png"))
+            static_artifact.add_file(str(output_dir / "static_UMAP_plot.png"))
+            wandb.log_artifact(static_artifact)
         # 評価
         accuracy, report = run_knn_classification(
             train_embeddings=cebra_train_embeddings, valid_embeddings=cebra_valid_embeddings,
             y_train=conditional_train, y_valid=conditional_valid,
-            label_map=label_map, output_dir=output_dir, knn_neighbors=cfg.evaluation.knn_neighbors
+            label_map=label_map, output_dir=output_dir, knn_neighbors=cfg.evaluation.knn_neighbors,
+            enable_plots=cfg.evaluation.enable_plots
         )
         wandb.log({"knn_accuracy": accuracy})
         report_path = output_dir / "classification_report.json"
@@ -194,19 +196,20 @@ def main(cfg: AppConfig) -> None:
         # 可視化 (Valenceスコアで色付け)
         # conditional_dataはVADのNumpy配列
         valence_scores = conditional_data[:, 0]
-        interactive_path = output_dir / "None.html"
-        save_interactive_plot(
-            embeddings=cebra_embeddings_full, text_labels=valence_scores,
-            output_dim=cfg.cebra.output_dim, palette=None, # 連続値なのでplotlyが自動でカラースケールを適用
-            title="Interactive CEBRA (None - Colored by Valence)",
-            output_path=interactive_path
-        )
-        if interactive_path.exists():
-            vis_artifact = wandb.Artifact(
-                name=interactive_path.stem, type="evaluation"
+        if cfg.evaluation.enable_plots:
+            interactive_path = output_dir / "None.html"
+            save_interactive_plot(
+                embeddings=cebra_embeddings_full, text_labels=valence_scores,
+                output_dim=cfg.cebra.output_dim, palette=None, # 連続値なのでplotlyが自動でカラースケールを適用
+                title="Interactive CEBRA (None - Colored by Valence)",
+                output_path=interactive_path
             )
-            vis_artifact.add_file(str(interactive_path))
-            wandb.log_artifact(vis_artifact)
+            if interactive_path.exists():
+                vis_artifact = wandb.Artifact(
+                    name=interactive_path.stem, type="evaluation"
+                )
+                vis_artifact.add_file(str(interactive_path))
+                wandb.log_artifact(vis_artifact)
         # 注意: 連続値の場合、カテゴリ別の静的プロットはそのままでは適用できない
 
         # 評価
@@ -220,7 +223,14 @@ def main(cfg: AppConfig) -> None:
     # --- 7. Consistency Check ---
     if cfg.consistency_check.enabled:
         print("\n--- Step 7: Running Consistency Check ---")
-        run_consistency_check(X_train, labels_for_training, X_valid, cfg, output_dir)
+        run_consistency_check(
+            X_train,
+            labels_for_training,
+            X_valid,
+            cfg,
+            output_dir,
+            enable_plots=cfg.evaluation.enable_plots,
+        )
 
     print("\n--- Pipeline Complete ---")
 
