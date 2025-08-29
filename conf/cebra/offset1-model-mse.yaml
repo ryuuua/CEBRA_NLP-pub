@@ -17,7 +17,7 @@ params:
   batch_size: 512
   learning_rate: 3e-4 # Higher learning rate
   temperature: 1.0
-  distance: 'cosine' # Different distance metric
+  distance: 'euclidean' # Different distance metric
   # MSE loss expects labels as vectors matching `output_dim`
   loss: mse
   verbose: True

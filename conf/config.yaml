@@ -19,7 +19,7 @@ evaluation:
   test_size: 0.2
   random_state: 42
   knn_neighbors: 5
-  enable_plots: true
+  enable_plots: false
 
 wandb:
   project: "CEBRA_NLP_Experiment"
