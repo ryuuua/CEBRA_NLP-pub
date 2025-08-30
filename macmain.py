@@ -1,11 +1,9 @@
 import hydra
-import numpy as np
 from omegaconf import OmegaConf
 import torch
 import wandb
 import pandas as pd
 from pathlib import Path
-from datasets import load_dataset
 from src.config_schema import AppConfig
 from hydra.core.hydra_config import HydraConfig
 from src.data import load_and_prepare_dataset
@@ -65,28 +63,7 @@ def main(cfg: AppConfig) -> None:
 
     # --- 1. Load Dataset ---
     print("\n--- Step 1: Loading dataset ---")
-    # 'conditional_data' という変数名に統一
-    if cfg.cebra.conditional == 'None':
-        dataset_cfg = cfg.dataset
-
-        # ローカルCSV読み込み
-        dataset = load_dataset(
-            path=dataset_cfg.hf_path,
-            data_files=dataset_cfg.data_files
-        )
-        df = pd.concat([pd.DataFrame(dataset[s]) for s in dataset.keys()], ignore_index=True)
-
-        # --- VAD列を直接使用 ---
-        df = df.dropna(subset=[dataset_cfg.text_column, 'V', 'A', 'D']).reset_index(drop=True)
-
-        vad_columns = ['V', 'A', 'D']
-        df_vad = df[vad_columns]
-        conditional_data = df_vad.to_numpy(dtype=np.float32)
-
-        texts = df[dataset_cfg.text_column].astype(str).tolist()
-        time_indices = np.arange(len(texts))
-    else:
-        texts, conditional_data, time_indices = load_and_prepare_dataset(cfg)
+    texts, conditional_data, time_indices = load_and_prepare_dataset(cfg)
 
     # --- 2. Get Text Embeddings ---
     print("\n--- Step 2: Generating text embeddings ---")

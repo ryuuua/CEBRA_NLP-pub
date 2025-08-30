@@ -9,15 +9,11 @@ if TYPE_CHECKING:
 
 def load_and_prepare_dataset(cfg: "AppConfig"):
     """
-    Loads the dataset specified in the config, prepares texts and labels.
+    Loads the dataset specified in the config and prepares texts,
+    conditional data (labels or VAD values), and time indices.
     """
     dataset_cfg = cfg.dataset
     print(f"Loading dataset: {dataset_cfg.name}")
-
-    if dataset_cfg.source is None:
-        raise ValueError(
-            "Dataset source is not specified. Supported sources are 'hf', 'csv', and 'kaggle'."
-        )
 
     if dataset_cfg.source == "hf":
         dataset = load_dataset(dataset_cfg.hf_path)
@@ -40,10 +36,18 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
         print("Applying special handling for go_emotions: using only the first label.")
         df[dataset_cfg.label_column] = df[dataset_cfg.label_column].apply(lambda x: x[0])
 
-    labels = df[dataset_cfg.label_column].to_numpy()
-    texts = df[dataset_cfg.text_column].tolist()
+    if cfg.cebra.conditional == "None":
+        # Expect V, A, D columns and drop rows with missing values
+        df = df.dropna(subset=[dataset_cfg.text_column, "V", "A", "D"]).reset_index(drop=True)
+        conditional_data = df[["V", "A", "D"]].to_numpy(dtype=np.float32)
+        texts = df[dataset_cfg.text_column].astype(str)
+    else:
+        labels = df[dataset_cfg.label_column]
+        df = df.dropna(subset=[dataset_cfg.text_column, dataset_cfg.label_column]).reset_index(drop=True)
+        conditional_data = labels.to_numpy()
+        texts = df[dataset_cfg.text_column].astype(str)
 
-    # Create sequential time indices for each sample
+    texts_list = texts.tolist()
     time_indices = np.arange(len(df))
 
-    return texts, labels, time_indices
+    return texts_list, conditional_data, time_indices
