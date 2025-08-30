@@ -1,6 +1,7 @@
 # conf/dataset/emobank.yaml
 
 name: "emobank"
+source: csv
 
 source: csv
 data_files: data/emobank.csv
