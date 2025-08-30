@@ -30,6 +30,8 @@ load_dotenv()
 
 @hydra.main(config_path="conf", config_name="config", version_base="1.2")
 def main(cfg: AppConfig) -> None:
+    default_cfg = OmegaConf.structured(AppConfig)
+    cfg = OmegaConf.merge(default_cfg, cfg)
     OmegaConf.set_struct(cfg, False)
     cfg.cebra.conditional = cfg.cebra.conditional.lower()
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
@@ -86,7 +88,7 @@ def main(cfg: AppConfig) -> None:
         if cfg.cebra.conditional == 'none':
             dataset_cfg = cfg.dataset
             # データセットのソースに応じて読み込み
-            source = getattr(dataset_cfg, "source", "hf")
+            source = dataset_cfg.source
             if source == "hf":
                 dataset = load_dataset(dataset_cfg.hf_path)
             elif source == "csv":
