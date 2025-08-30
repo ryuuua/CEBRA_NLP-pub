@@ -12,9 +12,9 @@ class VisualizationConfig:
 class DatasetConfig:
     name: str
     text_column: str
-    label_column: str
     label_map: Dict[int, str]
     visualization: VisualizationConfig
+    label_column: Optional[str] = None
     hf_path: Optional[str] = None
     source: str = "hf"
     data_files: Optional[str] = None

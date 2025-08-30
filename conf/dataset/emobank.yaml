@@ -2,12 +2,9 @@
 
 name: "emobank"
 source: csv
-
-source: csv
 data_files: data/emobank.csv
 
 text_column: text
-label_column: V  # placeholder to satisfy schema
 label_map: {}
 visualization:
   emotion_colors: {}
