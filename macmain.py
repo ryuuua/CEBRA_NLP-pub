@@ -29,6 +29,8 @@ load_dotenv()
 
 @hydra.main(config_path="conf", config_name="config", version_base="1.2")
 def main(cfg: AppConfig) -> None:
+    default_cfg = OmegaConf.structured(AppConfig)
+    cfg = OmegaConf.merge(default_cfg, cfg)
     OmegaConf.set_struct(cfg, False)
     cfg.ddp.world_size = 1
     cfg.ddp.rank = 0
