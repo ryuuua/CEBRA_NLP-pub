@@ -3,12 +3,13 @@
 name: "emobank"
 source: csv
 
-hf_path: csv  # HuggingFaceの代わりにローカルCSV指定
-data_files: data/emobank.csv  # 下で使うCSVファイルのローカルパス
+source: csv
+data_files: data/emobank.csv
 
 text_column: text
-label_column: V  # 実際には使わないが placeholder として指定
+label_column: V  # placeholder to satisfy schema
 label_map: {}
 visualization:
-emotion_colors: {}
-emotion_order: []
+  emotion_colors: {}
+  emotion_order: []
+
