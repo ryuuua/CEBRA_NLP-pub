@@ -1,6 +1,7 @@
 # conf/dataset/emobank.yaml
 
 name: "emobank"
+source: csv
 
 hf_path: csv  # HuggingFaceの代わりにローカルCSV指定
 data_files: data/emobank.csv  # 下で使うCSVファイルのローカルパス
