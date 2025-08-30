@@ -1,6 +1,7 @@
 cebra
 datasets
 gensim
+
 hydra-core
 matplotlib
 numpy
@@ -19,3 +20,4 @@ kagglehub
 kaleido
 optuna
 wandb
+kagglehub
