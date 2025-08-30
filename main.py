@@ -243,6 +243,8 @@ def main(cfg: AppConfig) -> None:
                 enable_plots=cfg.evaluation.enable_plots,
             )
     finally:
+        if wandb.run is not None:
+            wandb.finish()
         if cfg.ddp.world_size > 1 and dist.is_initialized():
             dist.destroy_process_group()
 
