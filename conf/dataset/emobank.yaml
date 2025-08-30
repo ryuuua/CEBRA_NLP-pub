@@ -1,6 +1,7 @@
 # conf/dataset/emobank.yaml
 
 name: "emobank"
+source: csv
 
 source: csv
 data_files: data/emobank.csv
@@ -11,3 +12,4 @@ label_map: {}
 visualization:
   emotion_colors: {}
   emotion_order: []
+
