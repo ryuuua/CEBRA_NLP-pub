@@ -20,4 +20,5 @@ params:
   distance: 'euclidean' # Different distance metric
   # MSE loss expects labels as vectors matching `output_dim`
   loss: mse
+  prior: 'uniform'
   verbose: True
