@@ -27,6 +27,7 @@ class EmbeddingConfig:
     name: str
     type: str
     model_name: str
+    output_dim: int
     # Word2Vec用のパラメータなど、特定のモデルのみで使う設定も定義可能
     vector_size: int = 100
     window: int = 5
@@ -35,6 +36,7 @@ class EmbeddingConfig:
 
 @dataclass
 class CEBRAConfig:
+    name: str
     output_dim: int
     max_iterations: int
     conditional: str
@@ -79,6 +81,7 @@ class ConsistencyCheckConfig:
 @dataclass
 class HyperParamTuningConfig:
     """Hyperparameter ranges for grid search."""
+    hydra: Dict[str, Any] = field(default_factory=dict)
     output_dims: List[int] = field(default_factory=lambda: list(range(2, 21)))
     batch_sizes: List[int] = field(default_factory=lambda: [512])
     learning_rates: List[float] = field(default_factory=lambda: [1e-3])
