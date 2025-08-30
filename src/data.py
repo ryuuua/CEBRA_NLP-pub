@@ -32,6 +32,16 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
             f"Unsupported dataset source: {dataset_cfg.source}. Supported sources are 'hf', 'csv', and 'kaggle'."
         )
 
+
+    # Combine all splits for a comprehensive analysis
+    all_splits = [pd.DataFrame(dataset[split]) for split in dataset.keys()]
+    df = pd.concat(all_splits, ignore_index=True)
+    
+    # Special handling for go_emotions: use only the first label
+    if dataset_cfg.name == "go_emotions" and dataset_cfg.label_column is not None:
+        print("Applying special handling for go_emotions: using only the first label.")
+        df[dataset_cfg.label_column] = df[dataset_cfg.label_column].apply(lambda x: x[0])
+
     if dataset_cfg.source == "kaggle":
         path = kagglehub.dataset_download("kashnitsky/hierarchical-text-classification")
         csv_files = [f for f in os.listdir(path) if f.endswith(".csv")]
@@ -57,6 +67,10 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
         conditional_data = df[["V", "A", "D"]].to_numpy(dtype=np.float32)
         texts = df[dataset_cfg.text_column].astype(str)
     else:
+        if dataset_cfg.label_column is None:
+            raise ValueError(
+                "dataset.label_column must be set when cfg.cebra.conditional is not 'None'"
+            )
         labels = df[dataset_cfg.label_column]
         df = df.dropna(subset=[dataset_cfg.text_column, dataset_cfg.label_column]).reset_index(drop=True)
         conditional_data = labels.to_numpy()
