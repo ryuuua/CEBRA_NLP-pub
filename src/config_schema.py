@@ -6,17 +6,20 @@ from typing import List, Dict, Any, Optional, Literal
 @dataclass
 class VisualizationConfig:
     emotion_colors: Dict[str, str]
-    emotion_order: List[str] # ← この行を追加
+    emotion_order: List[str]
 
 @dataclass
 class DatasetConfig:
     name: str
-    hf_path: str
     text_column: str
     label_column: str
     label_map: Dict[int, str]
     visualization: VisualizationConfig
+
+    hf_path: Optional[str] = None
     source: str = "hf"
+    data_files: Optional[str] = None
+
 
 @dataclass
 class EmbeddingConfig:
@@ -47,6 +50,7 @@ class EvaluationConfig:
     test_size: float
     random_state: int
     knn_neighbors: int
+    enable_plots: bool = True
 
 @dataclass
 class WandBConfig:
@@ -63,6 +67,7 @@ class DDPConfig:
 @dataclass
 class PathsConfig:
     embedding_cache_dir: str
+    kaggle_data_dir: str = "data/kaggle/hierarchical-text-classification"
 
 @dataclass
 class ConsistencyCheckConfig:
@@ -90,3 +95,4 @@ class AppConfig:
     consistency_check: ConsistencyCheckConfig
     hpt: HyperParamTuningConfig
     ddp: DDPConfig
+    device: str

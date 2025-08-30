@@ -1,11 +1,14 @@
 # デフォルトで読み込む設定グループを指定
 defaults:
+  - paths: default
   - dataset: dair-ai
   - embedding: bert
-  - cebra: cebra7dim2
+  - cebra: offset1-model-mse
   - consistency_check: default
-  - hpt: default
+  - hpt: my_sweep
   - _self_
+
+device: ${oc.env:DEVICE, cpu}
 
 hydra:
   run:
@@ -16,17 +19,18 @@ evaluation:
   test_size: 0.2
   random_state: 42
   knn_neighbors: 5
+  enable_plots: false
 
 wandb:
   project: "CEBRA_NLP_Experiment"
   run_name: "default_run"
   entity: null
-secrets:
-  aws_access_key_id: ${oc.env:AWS_ACCESS_KEY_ID}
-  aws_secret_access_key: ${oc.env:AWS_SECRET_ACCESS_KEY}
-  endpoint_url: ${oc.env:MLFLOW_S3_ENDPOINT_URL, http://localhost:9000}
-  region: ${oc.env:AWS_DEFAULT_REGION, us-east-1}
-  s3_signature_version: ${oc.env:AWS_S3_SIGNATURE_VERSION, s3v4}
+# secrets:
+#   aws_access_key_id: ${oc.env:AWS_ACCESS_KEY_ID}
+#   aws_secret_access_key: ${oc.env:AWS_SECRET_ACCESS_KEY}
+#   endpoint_url: ${oc.env:MLFLOW_S3_ENDPOINT_URL, http://localhost:9000}
+#   region: ${oc.env:AWS_DEFAULT_REGION, us-east-1}
+#   s3_signature_version: ${oc.env:AWS_S3_SIGNATURE_VERSION, s3v4}
 ddp:
   world_size: 1
   rank: 0

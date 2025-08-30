@@ -1,0 +1,80 @@
+paths:
+  embedding_cache_dir: embedding_cache
+  kaggle_data_dir: data/kaggle/hierarchical-text-classification
+dataset:
+  name: dair-ai
+  source: hf
+  hf_path: dair-ai/emotion
+  text_column: text
+  label_column: label
+  label_map:
+    0: sadness
+    1: joy
+    2: love
+    3: anger
+    4: fear
+    5: surprise
+  visualization:
+    emotion_order:
+    - sadness
+    - joy
+    - love
+    - anger
+    - fear
+    - surprise
+    emotion_colors:
+      sadness: '#0000FF'
+      joy: '#FFD700'
+      love: '#FF69B4'
+      anger: '#FF0000'
+      fear: '#800080'
+      surprise: '#00FFFF'
+embedding:
+  name: bert-base-uncased
+  type: hf_transformer
+  model_name: bert-base-uncased
+  output_dim: 768
+cebra:
+  name: offset1-model-mse
+  model_architecture: offset1-model-mse
+  output_dim: 2
+  max_iterations: 15000
+  conditional: discrete
+  num_workers: 2
+  pin_memory: true
+  persistent_workers: true
+  prefetch_factor: 2
+  params:
+    batch_size: 512
+    learning_rate: 0.0003
+    temperature: 1.0
+    distance: cosine
+    loss: mse
+    verbose: true
+consistency_check:
+  enabled: true
+  num_runs: 5
+hpt:
+  hydra:
+    sweeper:
+      params:
+        dataset: dair-ai,go_emotions
+        embedding: bert,roberta,sentence_bert
+        cebra: offset1-model-mse,offset1-model-v4,supervised1-model
+        cebra.output_dim: 2,3,4,5,6,7,8,9,10,11,12,13,14
+        cebra.max_iterations: 15000
+        cebra.params.batch_size: 512,1024
+        cebra.params.learning_rate: 3e-4,1e-4
+device: ${oc.env:DEVICE, cpu}
+evaluation:
+  test_size: 0.2
+  random_state: 42
+  knn_neighbors: 5
+wandb:
+  project: CEBRA_NLP_Experiment
+  run_name: default_run
+  entity: null
+ddp:
+  world_size: 1
+  rank: 0
+  local_rank: 0

@@ -30,6 +30,8 @@ load_dotenv()
 
 @hydra.main(config_path="conf", config_name="config", version_base="1.2")
 def main(cfg: AppConfig) -> None:
+    default_cfg = OmegaConf.structured(AppConfig)
+    cfg = OmegaConf.merge(default_cfg, cfg)
     OmegaConf.set_struct(cfg, False)
     cfg.ddp.world_size = 1
     cfg.ddp.rank = 0
@@ -154,9 +156,12 @@ def main(cfg: AppConfig) -> None:
                         "Interactive CEBRA (Discrete)",
                         interactive_path,
                     )
-                    vis_artifact = wandb.Artifact(name=interactive_path.stem, type="evaluation")
-                    vis_artifact.add_file(str(interactive_path))
-                    wandb.log_artifact(vis_artifact)
+                    if interactive_path.exists():
+                        vis_artifact = wandb.Artifact(
+                            name=interactive_path.stem, type="evaluation"
+                        )
+                        vis_artifact.add_file(str(interactive_path))
+                        wandb.log_artifact(vis_artifact)
                     accuracy, report = run_knn_classification(
                         train_embeddings=cebra_train_embeddings,
                         valid_embeddings=cebra_valid_embeddings,
@@ -183,9 +188,12 @@ def main(cfg: AppConfig) -> None:
                         title="Interactive CEBRA (None - Colored by Valence)",
                         output_path=interactive_path,
                     )
-                    vis_artifact = wandb.Artifact(name=interactive_path.stem, type="evaluation")
-                    vis_artifact.add_file(str(interactive_path))
-                    wandb.log_artifact(vis_artifact)
+                    if interactive_path.exists():
+                        vis_artifact = wandb.Artifact(
+                            name=interactive_path.stem, type="evaluation"
+                        )
+                        vis_artifact.add_file(str(interactive_path))
+                        wandb.log_artifact(vis_artifact)
                     mse, r2 = run_knn_regression(
                         train_embeddings=cebra_train_embeddings,
                         valid_embeddings=cebra_valid_embeddings,

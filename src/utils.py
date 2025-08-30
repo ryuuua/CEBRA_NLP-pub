@@ -1,7 +1,6 @@
 from pathlib import Path
 import numpy as np
 from omegaconf import OmegaConf
-from src.config_schema import AppConfig # ← この行を追加
 
 def get_embedding_cache_path(cfg):
     """

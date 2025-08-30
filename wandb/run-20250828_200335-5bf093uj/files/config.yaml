@@ -1,0 +1,156 @@
+_wandb:
+    value:
+        cli_version: 0.21.1
+        e:
+            m096e1wqtqda9k4suij6n3an92dbalw4:
+                args:
+                    - -m
+                    - hpt=my_sweep
+                codePath: main.py
+                codePathLocal: main.py
+                cpu_count: 14
+                cpu_count_logical: 20
+                disk:
+                    /:
+                        total: "1022253592576"
+                        used: "532347244544"
+                email: ryua00131@gmail.com
+                executable: C:\Users\ryua0\CEBRAEMO\.vemoenv\Scripts\python.exe
+                git:
+                    commit: 6169a9a912c877370957887b550808289b08a41f
+                    remote: https://github.com/ryuuua/CEBRA_NLP.git
+                host: ryuu
+                memory:
+                    total: "34084032512"
+                os: Windows-11-10.0.26100-SP0
+                program: C:\Users\ryua0\CEBRAEMO\main.py
+                python: CPython 3.12.10
+                root: C:\Users\ryua0\CEBRAEMO
+                startedAt: "2025-08-28T11:03:35.822952Z"
+                writerId: m096e1wqtqda9k4suij6n3an92dbalw4
+        m: []
+        python_version: 3.12.10
+        t:
+            "1":
+                - 1
+                - 5
+                - 49
+                - 50
+                - 51
+                - 53
+                - 105
+            "2":
+                - 1
+                - 5
+                - 49
+                - 50
+                - 51
+                - 53
+                - 105
+            "3":
+                - 13
+                - 16
+            "4": 3.12.10
+            "5": 0.21.1
+            "8":
+                - 3
+            "12": 0.21.1
+            "13": windows-amd64
+cebra:
+    value:
+        conditional: discrete
+        max_iterations: 15000
+        model_architecture: offset1-model-mse
+        name: offset1-model-mse
+        num_workers: 2
+        output_dim: 2
+        params:
+            batch_size: 512
+            distance: cosine
+            learning_rate: 0.0003
+            loss: mse
+            temperature: 1
+            verbose: true
+        persistent_workers: true
+        pin_memory: true
+        prefetch_factor: 2
+cebra_conditional:
+    value: discrete
+cebra_max_iterations:
+    value: 15000
+cebra_model_architecture:
+    value: offset1-model-mse
+cebra_output_dim:
+    value: 2
+consistency_check:
+    value:
+        enabled: true
+        num_runs: 5
+dataset:
+    value:
+        hf_path: dair-ai/emotion
+        label_column: label
+        label_map:
+            "0": sadness
+            "1": joy
+            "2": love
+            "3": anger
+            "4": fear
+            "5": surprise
+        name: dair-ai
+        source: hf
+        text_column: text
+        visualization:
+            emotion_colors:
+                anger: '#FF0000'
+                fear: '#800080'
+                joy: '#FFD700'
+                love: '#FF69B4'
+                sadness: '#0000FF'
+                surprise: '#00FFFF'
+            emotion_order:
+                - sadness
+                - joy
+                - love
+                - anger
+                - fear
+                - surprise
+ddp:
+    value:
+        local_rank: 0
+        rank: 0
+        world_size: 1
+device:
+    value: cpu
+embedding:
+    value:
+        model_name: bert-base-uncased
+        name: bert-base-uncased
+        output_dim: 768
+        type: hf_transformer
+evaluation:
+    value:
+        knn_neighbors: 5
+        random_state: 42
+        test_size: 0.2
+hpt:
+    value:
+        hydra:
+            sweeper:
+                params:
+                    cebra: offset1-model-mse,offset1-model-v4,supervised1-model
+                    cebra.max_iterations: 15000
+                    cebra.output_dim: 2,3,4,5,6,7,8,9,10,11,12,13,14
+                    cebra.params.batch_size: 512,1024
+                    cebra.params.learning_rate: 3e-4,1e-4
+                    dataset: dair-ai,go_emotions
+                    embedding: bert,roberta,sentence_bert
+paths:
+    value:
+        embedding_cache_dir: embedding_cache
+        kaggle_data_dir: data/kaggle/hierarchical-text-classification
+wandb:
+    value:
+        entity: null
+        project: CEBRA_NLP_Experiment
+        run_name: default_run

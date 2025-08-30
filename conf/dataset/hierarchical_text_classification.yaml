@@ -1,0 +1,13 @@
+# @package dataset
+name: hierarchical_text_classification
+source: kaggle
+data_files: train.csv
+text_column: text
+label_column: label
+label_map:
+  0: "business"
+  1: "entertainment"
+  2: "politics"
+  3: "sport"
+  4: "tech"
+

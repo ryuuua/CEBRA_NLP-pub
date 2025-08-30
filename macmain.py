@@ -1,11 +1,9 @@
 import hydra
-import numpy as np
 from omegaconf import OmegaConf
 import torch
 import wandb
-import pandas as pd # ← 追加
+import pandas as pd
 from pathlib import Path
-from datasets import load_dataset # ← 追加
 from src.config_schema import AppConfig
 from hydra.core.hydra_config import HydraConfig
 from src.data import load_and_prepare_dataset
@@ -29,6 +27,8 @@ load_dotenv()
 
 @hydra.main(config_path="conf", config_name="config", version_base="1.2")
 def main(cfg: AppConfig) -> None:
+    default_cfg = OmegaConf.structured(AppConfig)
+    cfg = OmegaConf.merge(default_cfg, cfg)
     OmegaConf.set_struct(cfg, False)
     cfg.ddp.world_size = 1
     cfg.ddp.rank = 0
@@ -65,28 +65,7 @@ def main(cfg: AppConfig) -> None:
 
     # --- 1. Load Dataset ---
     print("\n--- Step 1: Loading dataset ---")
-    # 'conditional_data' という変数名に統一
-    if cfg.cebra.conditional == 'None':
-        dataset_cfg = cfg.dataset
-
-        # ローカルCSV読み込み
-        dataset = load_dataset(
-            path=dataset_cfg.hf_path,
-            data_files=dataset_cfg.data_files
-        )
-        df = pd.concat([pd.DataFrame(dataset[s]) for s in dataset.keys()], ignore_index=True)
-
-        # --- VAD列を直接使用 ---
-        df = df.dropna(subset=[dataset_cfg.text_column, 'V', 'A', 'D']).reset_index(drop=True)
-
-        vad_columns = ['V', 'A', 'D']
-        df_vad = df[vad_columns]
-        conditional_data = df_vad.to_numpy(dtype=np.float32)
-
-        texts = df[dataset_cfg.text_column].astype(str).tolist()
-        time_indices = np.arange(len(texts))
-    else:
-        texts, conditional_data, time_indices = load_and_prepare_dataset(cfg)
+    texts, conditional_data, time_indices = load_and_prepare_dataset(cfg)
 
     # --- 2. Get Text Embeddings ---
     print("\n--- Step 2: Generating text embeddings ---")
@@ -140,10 +119,20 @@ def main(cfg: AppConfig) -> None:
 
         # 可視化
         interactive_path = output_dir / "cebra_interactive_discrete.html"
-        save_interactive_plot(cebra_embeddings_full, text_labels_full, cfg.cebra.output_dim, palette, "Interactive CEBRA (Discrete)", interactive_path)
-        vis_artifact = wandb.Artifact(name=interactive_path.stem, type="evaluation")
-        vis_artifact.add_file(str(interactive_path))
-        wandb.log_artifact(vis_artifact)
+        save_interactive_plot(
+            cebra_embeddings_full,
+            text_labels_full,
+            cfg.cebra.output_dim,
+            palette,
+            "Interactive CEBRA (Discrete)",
+            interactive_path,
+        )
+        if interactive_path.exists():
+            vis_artifact = wandb.Artifact(
+                name=interactive_path.stem, type="evaluation"
+            )
+            vis_artifact.add_file(str(interactive_path))
+            wandb.log_artifact(vis_artifact)
         save_static_2d_plots(cebra_embeddings_full, text_labels_full, palette, "CEBRA Embeddings (Discrete)", output_dir, order)
         static_artifact = wandb.Artifact("cebra-static-plots", type="evaluation")
         static_artifact.add_file(str(output_dir / "static_PCA_plot.png"))
@@ -176,9 +165,12 @@ def main(cfg: AppConfig) -> None:
             title="Interactive CEBRA (None - Colored by Valence)",
             output_path=interactive_path
         )
-        vis_artifact = wandb.Artifact(name=interactive_path.stem, type="evaluation")
-        vis_artifact.add_file(str(interactive_path))
-        wandb.log_artifact(vis_artifact)
+        if interactive_path.exists():
+            vis_artifact = wandb.Artifact(
+                name=interactive_path.stem, type="evaluation"
+            )
+            vis_artifact.add_file(str(interactive_path))
+            wandb.log_artifact(vis_artifact)
         # 注意: 連続値の場合、カテゴリ別の静的プロットはそのままでは適用できない
 
         # 評価
