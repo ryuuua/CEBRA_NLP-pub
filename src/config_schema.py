@@ -27,7 +27,7 @@ class EmbeddingConfig:
     name: str
     type: str
     model_name: str
-    output_dim: int
+    output_dim: int = 0
     # Word2Vec用のパラメータなど、特定のモデルのみで使う設定も定義可能
     vector_size: int = 100
     window: int = 5
@@ -36,10 +36,10 @@ class EmbeddingConfig:
 
 @dataclass
 class CEBRAConfig:
-    name: str
-    output_dim: int
-    max_iterations: int
-    conditional: str
+    name: str = ""
+    output_dim: int = 0
+    max_iterations: int = 0
+    conditional: str = "none"
     # Allow arbitrary model names so new architectures can be specified
     model_architecture: str = "offset1-model"
     params: Dict[str, Any] = field(default_factory=dict)
@@ -99,4 +99,4 @@ class AppConfig:
     consistency_check: ConsistencyCheckConfig
     hpt: HyperParamTuningConfig
     ddp: DDPConfig
-    device: str
+    device: str = "cpu"
