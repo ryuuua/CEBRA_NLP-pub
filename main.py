@@ -159,10 +159,9 @@ def main(cfg: AppConfig) -> None:
             print("Running discrete evaluation and visualization...")
             label_map = {int(k): v for k, v in cfg.dataset.label_map.items()}
             labels = np.asarray(conditional_data, dtype=int)
-            uniq_before = sorted(set(labels.tolist()))
-            if set(uniq_before) == {-1, 1} and (0 in label_map and 1 in label_map):
-                remap_numeric = {-1: 0, 1: 1}
-                labels = np.vectorize(remap_numeric.get)(labels)
+            
+            if set(conditional_data) == {-1, 1}:
+    　　　　　    conditional_data = [0 if x == -1 else 1 for x in conditional_data]
             
             text_labels_full = [label_map[l] for l in conditional_data]
             palette = OmegaConf.to_container(cfg.dataset.visualization.emotion_colors, resolve=True)
