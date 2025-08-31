@@ -159,10 +159,9 @@ def main(cfg: AppConfig) -> None:
             print("Running discrete evaluation and visualization...")
             label_map = {int(k): v for k, v in cfg.dataset.label_map.items()}
             labels = np.asarray(conditional_data, dtype=int)
-            
+            # 半角スペース4つなどでインデントし直して貼ってください
             if set(conditional_data) == {-1, 1}:
-    　　　　　    conditional_data = [0 if x == -1 else 1 for x in conditional_data]
-            
+                conditional_data = [0 if x == -1 else 1 for x in conditional_data]
             text_labels_full = [label_map[l] for l in conditional_data]
             palette = OmegaConf.to_container(cfg.dataset.visualization.emotion_colors, resolve=True)
             order = OmegaConf.to_container(cfg.dataset.visualization.emotion_order, resolve=True)
