@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from src.config_schema import AppConfig
 
+
 def load_and_prepare_dataset(cfg: "AppConfig"):
     """
     Loads the dataset specified in the config and prepares texts,
@@ -19,30 +20,15 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
     dataset_cfg = cfg.dataset
     print(f"Loading dataset: {dataset_cfg.name}")
 
-
     if dataset_cfg.source == "hf":
         dataset = load_dataset(dataset_cfg.hf_path)
+        all_splits = [pd.DataFrame(dataset[split]) for split in dataset.keys()]
+        df = pd.concat(all_splits, ignore_index=True)
     elif dataset_cfg.source == "csv":
         dataset = load_dataset("csv", data_files=dataset_cfg.data_files)
+        all_splits = [pd.DataFrame(dataset[split]) for split in dataset.keys()]
+        df = pd.concat(all_splits, ignore_index=True)
     elif dataset_cfg.source == "kaggle":
-        data_path = os.path.join(cfg.paths.kaggle_data_dir, dataset_cfg.data_files)
-        dataset = load_dataset("csv", data_files=data_path)
-    else:
-        raise ValueError(
-            f"Unsupported dataset source: {dataset_cfg.source}. Supported sources are 'hf', 'csv', and 'kaggle'."
-        )
-
-
-    # Combine all splits for a comprehensive analysis
-    all_splits = [pd.DataFrame(dataset[split]) for split in dataset.keys()]
-    df = pd.concat(all_splits, ignore_index=True)
-    
-    # Special handling for go_emotions: use only the first label
-    if dataset_cfg.name == "go_emotions" and dataset_cfg.label_column is not None:
-        print("Applying special handling for go_emotions: using only the first label.")
-        df[dataset_cfg.label_column] = df[dataset_cfg.label_column].apply(lambda x: x[0])
-
-    if dataset_cfg.source == "kaggle":
         path = kagglehub.dataset_download("kashnitsky/hierarchical-text-classification")
         csv_files = [f for f in os.listdir(path) if f.endswith(".csv")]
         if not csv_files:
@@ -50,16 +36,14 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
         csv_path = os.path.join(path, csv_files[0])
         df = pd.read_csv(csv_path)
     else:
-        dataset = load_dataset(dataset_cfg.hf_path)
+        raise ValueError(
+            f"Unsupported dataset source: {dataset_cfg.source}. Supported sources are 'hf', 'csv', and 'kaggle'."
+        )
 
-        # Combine all splits for a comprehensive analysis
-        all_splits = [pd.DataFrame(dataset[split]) for split in dataset.keys()]
-        df = pd.concat(all_splits, ignore_index=True)
-
-        # Special handling for go_emotions: use only the first label
-        if dataset_cfg.name == "go_emotions":
-            print("Applying special handling for go_emotions: using only the first label.")
-            df[dataset_cfg.label_column] = df[dataset_cfg.label_column].apply(lambda x: x[0])
+    # Special handling for go_emotions: use only the first label
+    if dataset_cfg.name == "go_emotions" and dataset_cfg.label_column is not None:
+        print("Applying special handling for go_emotions: using only the first label.")
+        df[dataset_cfg.label_column] = df[dataset_cfg.label_column].apply(lambda x: x[0])
 
     if cfg.cebra.conditional == "None":
         # Expect V, A, D columns and drop rows with missing values
