@@ -20,6 +20,7 @@ class DatasetConfig:
     hf_path: Optional[str] = None
     source: str = "hf"
     data_files: Optional[str] = None
+    splits: List[str] = field(default_factory=list)
 
 
 @dataclass

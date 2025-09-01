@@ -21,8 +21,12 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
     print(f"Loading dataset: {dataset_cfg.name}")
 
     if dataset_cfg.source == "hf":
-        dataset = load_dataset(dataset_cfg.hf_path)
-        all_splits = [pd.DataFrame(dataset[split]) for split in dataset.keys()]
+        if dataset_cfg.splits:
+            datasets = [load_dataset(dataset_cfg.hf_path, split=split) for split in dataset_cfg.splits]
+        else:
+            dataset = load_dataset(dataset_cfg.hf_path)
+            datasets = [dataset[split] for split in dataset.keys()]
+        all_splits = [pd.DataFrame(d) for d in datasets]
         df = pd.concat(all_splits, ignore_index=True)
     elif dataset_cfg.source == "csv":
         dataset = load_dataset("csv", data_files=dataset_cfg.data_files)
@@ -44,6 +48,10 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
     if dataset_cfg.name == "go_emotions" and dataset_cfg.label_column is not None:
         print("Applying special handling for go_emotions: using only the first label.")
         df[dataset_cfg.label_column] = df[dataset_cfg.label_column].apply(lambda x: x[0])
+
+    if dataset_cfg.label_column is not None:
+        valid_labels = set(dataset_cfg.label_map.keys())
+        df = df[df[dataset_cfg.label_column].isin(valid_labels)].reset_index(drop=True)
 
     if cfg.cebra.conditional == "None":
         # Expect V, A, D columns and drop rows with missing values
