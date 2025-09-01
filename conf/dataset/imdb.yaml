@@ -1,6 +1,8 @@
 # @package dataset
 
 name: imdb
+source: hf
+splits: ["train", "test"]
 hf_path: "imdb"
 text_column: "text"
 label_column: "label"
@@ -15,3 +17,4 @@ visualization:
   emotion_colors:
     negative: '#FF0000'
     positive: '#008000'
+
