@@ -21,6 +21,8 @@ class DatasetConfig:
     source: str = "hf"
     data_files: Optional[str] = None
     splits: List[str] = field(default_factory=list)
+    shuffle: bool = False
+    shuffle_seed: Optional[int] = None
 
 
 @dataclass
