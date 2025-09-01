@@ -5,6 +5,7 @@ source: hf
 hf_path: "go_emotions"
 text_column: "text"
 label_column: "labels"
+shuffle: false
 
 # Mapping from integer label to string name
 label_map:

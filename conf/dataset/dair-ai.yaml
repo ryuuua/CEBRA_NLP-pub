@@ -4,6 +4,7 @@ source: hf
 hf_path: "dair-ai/emotion"
 text_column: "text"
 label_column: "label"
+shuffle: false
 
 # Label and visualization settings
 label_map:

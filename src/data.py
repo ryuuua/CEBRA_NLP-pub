@@ -52,22 +52,31 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
     if dataset_cfg.label_column is not None:
         valid_labels = set(dataset_cfg.label_map.keys())
         df = df[df[dataset_cfg.label_column].isin(valid_labels)].reset_index(drop=True)
-
     if cfg.cebra.conditional == "None":
         # Expect V, A, D columns and drop rows with missing values
         df = df.dropna(subset=[dataset_cfg.text_column, "V", "A", "D"]).reset_index(drop=True)
-        conditional_data = df[["V", "A", "D"]].to_numpy(dtype=np.float32)
-        texts = df[dataset_cfg.text_column].astype(str)
     else:
         if dataset_cfg.label_column is None:
             raise ValueError(
                 "dataset.label_column must be set when cfg.cebra.conditional is not 'None'"
             )
-        labels = df[dataset_cfg.label_column]
         df = df.dropna(subset=[dataset_cfg.text_column, dataset_cfg.label_column]).reset_index(drop=True)
-        conditional_data = labels.to_numpy()
-        texts = df[dataset_cfg.text_column].astype(str)
 
+    if cfg.dataset.shuffle:
+        seed = (
+            cfg.dataset.shuffle_seed
+            if getattr(cfg.dataset, "shuffle_seed", None) is not None
+            else (cfg.evaluation.random_state if hasattr(cfg, "evaluation") else None)
+        )
+        df = df.sample(frac=1, random_state=seed).reset_index(drop=True)
+
+    if cfg.cebra.conditional == "None":
+        conditional_data = df[["V", "A", "D"]].to_numpy(dtype=np.float32)
+    else:
+        labels = df[dataset_cfg.label_column]
+        conditional_data = labels.to_numpy()
+
+    texts = df[dataset_cfg.text_column].astype(str)
     texts_list = texts.tolist()
     time_indices = np.arange(len(df))
 
