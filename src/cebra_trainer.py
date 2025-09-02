@@ -42,11 +42,7 @@ def save_cebra_embeddings(embeddings, output_dir):
 
 
 def normalize_model_architecture(name: str) -> str:
-    """Normalize and register a model architecture name.
-
-    This ensures that custom architectures such as ``offset0-model`` are
-    registered with ``cebra``'s model registry so they can be referenced by
-    the high level :class:`cebra.CEBRA` API.
+    """Normalize and validate a model architecture name.
 
     Parameters
     ----------
@@ -56,66 +52,26 @@ def normalize_model_architecture(name: str) -> str:
     Returns
     -------
     str
-        Normalized architecture name that is registered in the cebra registry.
+        Normalized architecture name that is available in the cebra registry.
     """
 
-    import cebra, re
+    import cebra
 
     normalized = name.lower()
-
-    default_model = getattr(cebra.models, "Offset1Model", cebra.models.Offset0Model)
-
-    registry = {
-        "offset0-model": cebra.models.Offset0Model,
-        "offset1-model": default_model,
-        "offset1-model-mse": getattr(cebra.models, "Offset1ModelMSE", default_model),
-        "offset5-model": getattr(cebra.models, "Offset5Model", default_model),
-        "offset10-model": getattr(cebra.models, "Offset10Model", default_model),
-        "offset36-model": getattr(cebra.models, "Offset36", default_model),
-        "offset36-dropout": getattr(
-            cebra.models, "Offset36Dropout", default_model
-        ),
-        "offset36-dropout-v2": getattr(
-            cebra.models, "Offset36DropoutV2", default_model
-        ),
-        "resample-model": getattr(cebra.models, "ResampleModel", default_model),
-        "resample5-model": getattr(cebra.models, "Resample5Model", default_model),
-        "resample1-model": getattr(cebra.models, "Resample1Model", default_model),
-        "supervised10-model": getattr(
-            cebra.models, "SupervisedNN10", default_model
-        ),
-        "supervised1-model": getattr(
-            cebra.models, "SupervisedNN1", default_model
-        ),
-    }
-
-    ModelClass = registry.get(normalized)
-    if ModelClass is None:
-        parts = [p for p in re.split(r"[-_]", normalized) if p]
-        acronyms = {"mse"}
-        class_name = "".join(
-            part.upper() if part in acronyms else part.capitalize() for part in parts
-        )
-        ModelClass = getattr(cebra.models, class_name, None)
-
-    if ModelClass is None:
-        raise ValueError(f"Unsupported model_architecture: {name}")
-
     if normalized not in cebra.models.get_options():
-        cebra.models.register(normalized, override=True, deprecated=True)(ModelClass)
-
+        raise ValueError(f"Unsupported model_architecture: {name}")
     return normalized
 
 
 def _build_model(cfg: AppConfig, num_neurons: int):
     import cebra
 
-    name = normalize_model_architecture(
+    normalized = normalize_model_architecture(
         getattr(cfg.cebra, "model_architecture", "offset0-model")
     )
 
     return cebra.models.init(
-        name,
+        normalized,
         num_neurons=num_neurons,
         num_units=cfg.cebra.params.get("num_units", 512),
         num_output=cfg.cebra.output_dim,
