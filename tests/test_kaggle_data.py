@@ -65,7 +65,7 @@ def test_kaggle_loading(monkeypatch, tmp_path):
     monkeypatch.setattr("src.data.kagglehub.dataset_download", fake_download)
 
     cfg = make_kaggle_config()
-    texts, labels, time_indices = load_and_prepare_dataset(cfg)
+    texts, labels, time_indices, _ = load_and_prepare_dataset(cfg)
 
     assert texts == ["hello", "world"]
     assert labels.tolist() == [0, 1]
