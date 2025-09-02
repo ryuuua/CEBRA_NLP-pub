@@ -54,7 +54,7 @@ def test_imdb_unlabeled_filter(monkeypatch):
 
     monkeypatch.setattr("src.data.load_dataset", fake_load_dataset)
 
-    texts, labels, _ = load_and_prepare_dataset(cfg)
+    texts, labels, _, _ = load_and_prepare_dataset(cfg)
 
     valid_labels = set(cfg.dataset.label_map.keys())
     assert set(labels.tolist()).issubset(valid_labels)
