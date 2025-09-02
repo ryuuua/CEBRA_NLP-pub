@@ -55,16 +55,20 @@ def fake_load_dataset(path, split=None):
 
 def test_dataset_shuffle(monkeypatch):
     monkeypatch.setattr("src.data.load_dataset", fake_load_dataset)
+    cfg_unshuffled = _make_app_cfg(False)
+    texts_unshuffled, labels_unshuffled, _, ids_unshuffled = load_and_prepare_dataset(cfg_unshuffled)
 
     cfg_shuffled = _make_app_cfg(True)
-    texts_shuffled, _, _, _ = load_and_prepare_dataset(cfg_shuffled)
+    texts_shuffled, labels_shuffled, time_indices, ids_shuffled = load_and_prepare_dataset(cfg_shuffled)
     assert texts_shuffled == ["c", "d", "b", "a"]
 
-    cfg_unshuffled = _make_app_cfg(False)
-    texts_unshuffled, _, _, _ = load_and_prepare_dataset(cfg_unshuffled)
     assert texts_unshuffled == ["a", "b", "c", "d"]
     assert texts_shuffled != texts_unshuffled
-    
+
     # time indices should always be sequential after shuffling
-    _, _, time_indices, _ = load_and_prepare_dataset(cfg_shuffled)
     assert np.array_equal(time_indices, np.arange(len(time_indices)))
+
+    # ids should retain their original labels after shuffling
+    original_mapping = dict(zip(ids_unshuffled, labels_unshuffled))
+    shuffled_mapping = dict(zip(ids_shuffled, labels_shuffled))
+    assert original_mapping == shuffled_mapping
