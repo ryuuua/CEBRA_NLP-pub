@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 def load_and_prepare_dataset(cfg: "AppConfig"):
     """
     Loads the dataset specified in the config and prepares texts,
-    conditional data (labels or VAD values), and time indices.
+    conditional data (labels or VAD values), time indices, and stable IDs.
     """
     dataset_cfg = cfg.dataset
     print(f"Loading dataset: {dataset_cfg.name}")
@@ -62,6 +62,10 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
             )
         df = df.dropna(subset=[dataset_cfg.text_column, dataset_cfg.label_column]).reset_index(drop=True)
 
+    df = df.reset_index(drop=True)
+    if "id" not in df.columns:
+        df["id"] = np.arange(len(df))
+
     if cfg.dataset.shuffle:
         seed = (
             cfg.dataset.shuffle_seed
@@ -69,6 +73,8 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
             else (cfg.evaluation.random_state if hasattr(cfg, "evaluation") else None)
         )
         df = df.sample(frac=1, random_state=seed).reset_index(drop=True)
+
+    ids = df["id"].to_numpy()
 
     if cfg.cebra.conditional == "None":
         conditional_data = df[["V", "A", "D"]].to_numpy(dtype=np.float32)
@@ -80,4 +86,4 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
     texts_list = texts.tolist()
     time_indices = np.arange(len(df))
 
-    return texts_list, conditional_data, time_indices
+    return texts_list, conditional_data, time_indices, ids

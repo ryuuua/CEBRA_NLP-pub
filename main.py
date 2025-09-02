@@ -102,6 +102,16 @@ def main(cfg: AppConfig) -> None:
 
             # --- VAD列を直接使用 ---
             df = df.dropna(subset=[dataset_cfg.text_column, 'V', 'A', 'D']).reset_index(drop=True)
+            df = df.reset_index(drop=True)
+            if "id" not in df.columns:
+                df["id"] = np.arange(len(df))
+            if cfg.dataset.shuffle:
+                seed = (
+                    cfg.dataset.shuffle_seed
+                    if getattr(cfg.dataset, "shuffle_seed", None) is not None
+                    else (cfg.evaluation.random_state if hasattr(cfg, "evaluation") else None)
+                )
+                df = df.sample(frac=1, random_state=seed).reset_index(drop=True)
 
             vad_columns = ['V', 'A', 'D']
             df_vad = df[vad_columns]
@@ -109,20 +119,37 @@ def main(cfg: AppConfig) -> None:
 
             texts = df[dataset_cfg.text_column].astype(str).tolist()
             time_indices = np.arange(len(texts))
+            ids = df["id"].to_numpy()
         else:
-            texts, conditional_data, time_indices = load_and_prepare_dataset(cfg)
+            texts, conditional_data, time_indices, ids = load_and_prepare_dataset(cfg)
 
         # --- 2. Get Text Embeddings ---
         print("\n--- Step 2: Generating text embeddings ---")
-        # (このセクションは変更なし)
         embedding_cache_path = get_embedding_cache_path(cfg)
-        cached = load_text_embedding(embedding_cache_path)
-        if cached is None:
-            X_vectors = get_embeddings(texts, cfg)
-            save_text_embedding(time_indices, X_vectors, embedding_cache_path)
+
+        cache = load_text_embedding(embedding_cache_path)
+        seed = (
+            cfg.dataset.shuffle_seed
+            if getattr(cfg.dataset, "shuffle_seed", None) is not None
+            else (cfg.evaluation.random_state if hasattr(cfg, "evaluation") else None)
+        )
+        if cache is not None:
+            cached_ids, cached_embeddings, cached_seed = cache
+            if cached_seed == seed:
+                id_to_index = {int(i): idx for idx, i in enumerate(cached_ids)}
+                try:
+                    X_vectors = np.stack([cached_embeddings[id_to_index[int(i)]] for i in ids])
+                except KeyError:
+                    X_vectors = get_embeddings(texts, cfg)
+                    save_text_embedding(ids, X_vectors, seed, embedding_cache_path)
+            else:
+                print("Cached embeddings shuffle seed mismatch. Recomputing...")
+                X_vectors = get_embeddings(texts, cfg)
+                save_text_embedding(ids, X_vectors, seed, embedding_cache_path)
         else:
-            ids, X_vectors = cached
-            time_indices = ids
+            X_vectors = get_embeddings(texts, cfg)
+            save_text_embedding(ids, X_vectors, seed, embedding_cache_path)
+
 
         # --- Data Splitting ---
         print("\n--- Step 3: Splitting data ---")

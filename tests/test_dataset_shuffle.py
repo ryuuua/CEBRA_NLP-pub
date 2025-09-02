@@ -57,14 +57,14 @@ def test_dataset_shuffle(monkeypatch):
     monkeypatch.setattr("src.data.load_dataset", fake_load_dataset)
 
     cfg_shuffled = _make_app_cfg(True)
-    texts_shuffled, _, _ = load_and_prepare_dataset(cfg_shuffled)
+    texts_shuffled, _, _, _ = load_and_prepare_dataset(cfg_shuffled)
     assert texts_shuffled == ["c", "d", "b", "a"]
 
     cfg_unshuffled = _make_app_cfg(False)
-    texts_unshuffled, _, _ = load_and_prepare_dataset(cfg_unshuffled)
+    texts_unshuffled, _, _, _ = load_and_prepare_dataset(cfg_unshuffled)
     assert texts_unshuffled == ["a", "b", "c", "d"]
     assert texts_shuffled != texts_unshuffled
     
     # time indices should always be sequential after shuffling
-    _, _, time_indices = load_and_prepare_dataset(cfg_shuffled)
+    _, _, time_indices, _ = load_and_prepare_dataset(cfg_shuffled)
     assert np.array_equal(time_indices, np.arange(len(time_indices)))
