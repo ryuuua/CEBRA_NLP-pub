@@ -26,7 +26,6 @@ def get_embedding_cache_path(cfg):
         else:
             filename += "__shuffle"
 
-    # Use the complete filename (with shuffle markers) to build the path
     path = Path(base_dir) / f"{filename}.npz"
 
     return path
