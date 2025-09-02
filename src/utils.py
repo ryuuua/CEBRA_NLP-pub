@@ -17,23 +17,26 @@ def get_embedding_cache_path(cfg):
     # Create a filename-safe version of the embedding name
     safe_embedding_name = embedding_name.replace('/', '__')
     
-    path = Path(base_dir) / f"{dataset_name}__{safe_embedding_name}.npy"
+    path = Path(base_dir) / f"{dataset_name}__{safe_embedding_name}.npz"
     return path
 
-def save_text_embedding(embeddings, path: Path):
-    """Saves numpy embeddings to the specified path."""
+def save_text_embedding(ids, embeddings, shuffle_seed, path: Path):
+    """Saves numpy embeddings and their ids to the specified path."""
     print(f"Caching text embeddings to {path}...")
     path.parent.mkdir(parents=True, exist_ok=True)
-    np.save(path, embeddings)
+    np.savez(path, ids=ids, embeddings=embeddings, shuffle_seed=shuffle_seed)
     print("...done.")
 
 def load_text_embedding(path: Path):
-    """Loads numpy embeddings from the specified path if it exists."""
+    """Loads cached ids and embeddings from the specified path if it exists."""
     if path.exists():
         print(f"Found cached text embeddings at {path}. Loading...")
-        embeddings = np.load(path)
+        data = np.load(path, allow_pickle=True)
+        ids = data["ids"]
+        embeddings = data["embeddings"]
+        shuffle_seed = data["shuffle_seed"].item() if "shuffle_seed" in data else None
         print("...done.")
-        return embeddings
+        return ids, embeddings, shuffle_seed
     else:
         print(f"No cached text embeddings found at {path}.")
         return None
