@@ -43,6 +43,7 @@ class CEBRAConfig:
     output_dim: int = 0
     max_iterations: int = 0
     conditional: str = "none"
+    criterion: str = "infonce"
     # Allow arbitrary model names so new architectures can be specified
     model_architecture: str = "offset1-model"
     params: Dict[str, Any] = field(default_factory=dict)

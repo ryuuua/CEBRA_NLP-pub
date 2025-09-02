@@ -5,7 +5,6 @@ from src.config_schema import AppConfig
 from tqdm.auto import tqdm
 from collections import deque
 import wandb
-import warnings
 from cebra.distributions.discrete import DiscreteUniform, DiscreteEmpirical
 
 def get_cebra_config_hash(cfg):
@@ -118,7 +117,7 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
     import inspect
 
     cfg.cebra.conditional = cfg.cebra.conditional.lower()
-    loss_type = cfg.cebra.params.get("loss", "infonce").lower()
+    loss_type = cfg.cebra.criterion.lower()
 
     if X_vectors is None:
         raise ValueError("Embeddings `X_vectors` must not be None")
@@ -133,48 +132,17 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
             raise ValueError(
                 "`labels` must have the same number of samples as `X_vectors`"
             )
-
-        if loss_type == "mse":
-            if labels.ndim == 1:
-                if not np.issubdtype(labels.dtype, np.integer):
-                    raise ValueError(
-                        "MSE loss with 1D labels expects integer class indices"
-                    )
-                num_classes = int(labels.max()) + 1
-                if num_classes != cfg.cebra.output_dim:
-                    warnings.warn(
-                        "Adjusting cfg.cebra.output_dim from "
-                        f"{cfg.cebra.output_dim} to {num_classes} based on labels"
-                    )
-                    cfg.cebra.output_dim = num_classes
-                labels = np.eye(cfg.cebra.output_dim, dtype=np.float32)[labels]
-            elif labels.ndim == 2:
-                num_classes = labels.shape[1]
-                if num_classes != cfg.cebra.output_dim:
-                    warnings.warn(
-                        "Adjusting cfg.cebra.output_dim from "
-                        f"{cfg.cebra.output_dim} to {num_classes} based on labels"
-                    )
-                    cfg.cebra.output_dim = num_classes
-            else:
-                raise ValueError("`labels` must be 1D or 2D for MSE loss")
-            labels = labels.astype(np.float32)
-    elif loss_type == "mse" or cfg.cebra.conditional != "none":
+    elif cfg.cebra.conditional != "none":
         raise ValueError("`labels` are required for the selected training configuration")
-
-    from cebra.models.criterions import InfoNCE
+    from cebra.models import criterions as cebra_criterions
 
     X_tensor = torch.as_tensor(X_vectors, dtype=torch.float32)
     label_tensor = None
     dist = None
     if labels is not None:
-        dtype = (
-            torch.float32
-            if loss_type == "mse"
-            else (torch.long if cfg.cebra.conditional == "discrete" else torch.float32)
-        )
+        dtype = torch.long if cfg.cebra.conditional == "discrete" else torch.float32
         label_tensor = torch.as_tensor(labels, dtype=dtype)
-        if cfg.cebra.conditional == "discrete" and loss_type != "mse":
+        if cfg.cebra.conditional == "discrete":
             X_tensor = X_tensor.to(cfg.device)
             label_tensor = label_tensor.to(cfg.device)
             if cfg.cebra.params.get("prior", "uniform") == "uniform":
@@ -185,10 +153,7 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
     loader = None
     sampler = None
     if dist is None:
-        tensors = [X_tensor]
-        if label_tensor is not None:
-            tensors.append(label_tensor)
-        dataset = TensorDataset(*tensors)
+        dataset = TensorDataset(X_tensor)
         sampler = DistributedSampler(
             dataset, num_replicas=cfg.ddp.world_size, rank=cfg.ddp.rank
         )
@@ -228,14 +193,22 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
             model, device_ids=[cfg.ddp.local_rank]
         )
 
-    if loss_type == "mse":
-        criterion = torch.nn.MSELoss()
-    else:
-        params = inspect.signature(InfoNCE).parameters
-        if "offset" in params:
-            criterion = InfoNCE(model.get_offset())
-        else:
-            criterion = InfoNCE()
+    criterion_map = {
+        "infonce": cebra_criterions.InfoNCE,
+        "infomse": cebra_criterions.InfoMSE,
+        "fixedcosine": cebra_criterions.FixedCosineInfoNCE,
+        "fixedeuclidean": cebra_criterions.FixedEuclideanInfoNCE,
+        "learnablecosine": cebra_criterions.LearnableCosineInfoNCE,
+        "learnableeuclidean": cebra_criterions.LearnableEuclideanInfoNCE,
+        "nce": cebra_criterions.NCE,
+    }
+    if loss_type not in criterion_map:
+        raise ValueError(f"Unsupported loss type: {loss_type}")
+    Criterion = criterion_map[loss_type]
+    criterion_kwargs = {
+        k: v for k, v in cfg.cebra.params.items() if k in inspect.signature(Criterion).parameters
+    }
+    criterion = Criterion(**criterion_kwargs)
 
     optimizer = torch.optim.Adam(
         model.parameters(),
@@ -297,22 +270,13 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
             while steps < cfg.cebra.max_iterations:
                 sampler.set_epoch(epoch)
                 for batch in loader:
-                    if loss_type == "mse":
-                        batch_x, batch_y = batch
-                        embeddings = model(batch_x.to(cfg.device, non_blocking=True))
-                        if isinstance(embeddings, tuple):
-                            embeddings = embeddings[0]
-                        loss = criterion(
-                            embeddings, batch_y.to(cfg.device, non_blocking=True)
-                        )
-                    else:
-                        (batch_x,) = batch
-                        embeddings = model(batch_x.to(cfg.device, non_blocking=True))
-                        if isinstance(embeddings, tuple):
-                            embeddings = embeddings[0]
-                        if embeddings is None:
-                            raise ValueError("Model returned no embeddings")
-                        loss = criterion(embeddings)
+                    (batch_x,) = batch
+                    embeddings = model(batch_x.to(cfg.device, non_blocking=True))
+                    if isinstance(embeddings, tuple):
+                        embeddings = embeddings[0]
+                    if embeddings is None:
+                        raise ValueError("Model returned no embeddings")
+                    loss = criterion(embeddings)
 
                     optimizer.zero_grad()
                     loss.backward()
