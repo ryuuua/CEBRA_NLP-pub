@@ -126,6 +126,7 @@ def main(cfg: AppConfig) -> None:
         # --- 2. Get Text Embeddings ---
         print("\n--- Step 2: Generating text embeddings ---")
         embedding_cache_path = get_embedding_cache_path(cfg)
+
         cache = load_text_embedding(embedding_cache_path)
         seed = (
             cfg.dataset.shuffle_seed
@@ -148,6 +149,7 @@ def main(cfg: AppConfig) -> None:
         else:
             X_vectors = get_embeddings(texts, cfg)
             save_text_embedding(ids, X_vectors, seed, embedding_cache_path)
+
 
         # --- Data Splitting ---
         print("\n--- Step 3: Splitting data ---")
