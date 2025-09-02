@@ -5,7 +5,6 @@ import torch
 import wandb
 import pandas as pd
 from pathlib import Path
-from datasets import load_dataset
 from src.config_schema import AppConfig
 from hydra.core.hydra_config import HydraConfig
 from src.data import load_and_prepare_dataset
@@ -84,44 +83,7 @@ def main(cfg: AppConfig) -> None:
 
         # --- 1. Load Dataset ---
         print("\n--- Step 1: Loading dataset ---")
-        # 'conditional_data' という変数名に統一
-        if cfg.cebra.conditional == 'none':
-            dataset_cfg = cfg.dataset
-            # データセットのソースに応じて読み込み
-            source = dataset_cfg.source
-            if source == "hf":
-                dataset = load_dataset(dataset_cfg.hf_path)
-            elif source == "csv":
-                dataset = load_dataset("csv", data_files=dataset_cfg.data_files)
-            elif source == "kaggle":
-                kaggle_path = Path(cfg.paths.kaggle_data_dir) / dataset_cfg.data_files
-                dataset = load_dataset("csv", data_files=str(kaggle_path))
-            else:
-                raise ValueError(f"Unsupported dataset source: {source}")
-            df = pd.concat([pd.DataFrame(dataset[s]) for s in dataset.keys()], ignore_index=True)
-
-            # --- VAD列を直接使用 ---
-            df = df.dropna(subset=[dataset_cfg.text_column, 'V', 'A', 'D']).reset_index(drop=True)
-            df = df.reset_index(drop=True)
-            if "id" not in df.columns:
-                df["id"] = np.arange(len(df))
-            if cfg.dataset.shuffle:
-                seed = (
-                    cfg.dataset.shuffle_seed
-                    if getattr(cfg.dataset, "shuffle_seed", None) is not None
-                    else (cfg.evaluation.random_state if hasattr(cfg, "evaluation") else None)
-                )
-                df = df.sample(frac=1, random_state=seed).reset_index(drop=True)
-
-            vad_columns = ['V', 'A', 'D']
-            df_vad = df[vad_columns]
-            conditional_data = df_vad.to_numpy(dtype=np.float32)
-
-            texts = df[dataset_cfg.text_column].astype(str).tolist()
-            time_indices = np.arange(len(texts))
-            ids = df["id"].to_numpy()
-        else:
-            texts, conditional_data, time_indices, ids = load_and_prepare_dataset(cfg)
+        texts, conditional_data, time_indices, ids = load_and_prepare_dataset(cfg)
 
         # --- 2. Get Text Embeddings ---
         print("\n--- Step 2: Generating text embeddings ---")

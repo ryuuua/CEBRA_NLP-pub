@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 from datasets import load_dataset
 import kagglehub
-from src.config_schema import AppConfig # ← この行を追加
+from src.config_schema import AppConfig
 
 from typing import TYPE_CHECKING
 
@@ -13,11 +13,9 @@ if TYPE_CHECKING:
 
 
 def load_and_prepare_dataset(cfg: "AppConfig"):
-    """
-    Loads the dataset specified in the config and prepares texts,
-    conditional data (labels or VAD values), time indices, and stable IDs.
-    """
+    """Load dataset and prepare texts, conditional data, time indices and IDs."""
     dataset_cfg = cfg.dataset
+    conditional_mode = getattr(cfg.cebra, "conditional", "none").lower()
     print(f"Loading dataset: {dataset_cfg.name}")
 
     if dataset_cfg.source == "hf":
@@ -52,13 +50,13 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
     if dataset_cfg.label_column is not None:
         valid_labels = set(dataset_cfg.label_map.keys())
         df = df[df[dataset_cfg.label_column].isin(valid_labels)].reset_index(drop=True)
-    if cfg.cebra.conditional == "None":
+    if conditional_mode == "none":
         # Expect V, A, D columns and drop rows with missing values
         df = df.dropna(subset=[dataset_cfg.text_column, "V", "A", "D"]).reset_index(drop=True)
     else:
         if dataset_cfg.label_column is None:
             raise ValueError(
-                "dataset.label_column must be set when cfg.cebra.conditional is not 'None'"
+                "dataset.label_column must be set when cfg.cebra.conditional is not 'none'"
             )
         df = df.dropna(subset=[dataset_cfg.text_column, dataset_cfg.label_column]).reset_index(drop=True)
 
@@ -76,7 +74,7 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
 
     ids = df["id"].to_numpy()
 
-    if cfg.cebra.conditional == "None":
+    if conditional_mode == "none":
         conditional_data = df[["V", "A", "D"]].to_numpy(dtype=np.float32)
     else:
         labels = df[dataset_cfg.label_column]
