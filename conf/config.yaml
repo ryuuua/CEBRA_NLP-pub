@@ -22,7 +22,7 @@ evaluation:
   enable_plots: false
 
 wandb:
-  project: "CEBRA_NLP_Experiment"
+  project: "CEBRA_NLP_Experiment-${dataset.name}"
   run_name: "default_run"
   entity: null
 # secrets:
