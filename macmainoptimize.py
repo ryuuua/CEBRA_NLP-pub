@@ -69,10 +69,13 @@ def main(cfg: AppConfig) -> None:
     # 2. Get Text Embeddings
     print("\n--- Step 2: Generating text embeddings ---")
     embedding_cache_path = get_embedding_cache_path(cfg)
-    X_vectors = load_text_embedding(embedding_cache_path)
-    if X_vectors is None:
+    cached = load_text_embedding(embedding_cache_path)
+    if cached is None:
         X_vectors = get_embeddings(texts, cfg)
-        save_text_embedding(X_vectors, embedding_cache_path)
+        save_text_embedding(time_indices, X_vectors, embedding_cache_path)
+    else:
+        ids, X_vectors = cached
+        time_indices = ids
 
     # Data Splitting
     print("\n--- Step 3: Splitting data ---")
