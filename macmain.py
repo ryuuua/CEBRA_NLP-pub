@@ -16,7 +16,7 @@ from src.cebra_trainer import (
     normalize_model_architecture,
 )
 from sklearn.model_selection import train_test_split
-from src.results import (save_interactive_plot, save_static_2d_plots,
+from src.results import (save_interactive_plot, #save_static_2d_plots,
                          run_knn_classification, run_knn_regression,
                          run_consistency_check)
 from dotenv import load_dotenv
@@ -136,10 +136,10 @@ def main(cfg: AppConfig) -> None:
             )
             vis_artifact.add_file(str(interactive_path))
             wandb.log_artifact(vis_artifact)
-        save_static_2d_plots(cebra_embeddings_full, text_labels_full, palette, "CEBRA Embeddings (Discrete)", output_dir, order)
-        static_artifact = wandb.Artifact("cebra-static-plots", type="evaluation")
-        static_artifact.add_file(str(output_dir / "static_PCA_plot.png"))
-        static_artifact.add_file(str(output_dir / "static_UMAP_plot.png"))
+        # save_static_2d_plots(cebra_embeddings_full, text_labels_full, palette, "CEBRA Embeddings (Discrete)", output_dir, order)
+        # static_artifact = wandb.Artifact("cebra-static-plots", type="evaluation")
+        # static_artifact.add_file(str(output_dir / "static_PCA_plot.png"))
+        # static_artifact.add_file(str(output_dir / "static_UMAP_plot.png"))
         wandb.log_artifact(static_artifact)
         # 評価
         accuracy, report = run_knn_classification(
