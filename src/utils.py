@@ -16,9 +16,21 @@ def get_embedding_cache_path(cfg):
     
     # Create a filename-safe version of the embedding name
     safe_embedding_name = embedding_name.replace('/', '__')
+
+
+    filename = f"{dataset_name}__{safe_embedding_name}"
+    if getattr(cfg.dataset, "shuffle", False):
+        seed = getattr(cfg.dataset, "shuffle_seed", None)
+        if seed is not None:
+            filename += f"__seed{seed}"
+        else:
+            filename += "__shuffle"
+
+
     
 
     path = Path(base_dir) / f"{dataset_name}__{safe_embedding_name}.npz"
+
     return path
 
 def save_text_embedding(ids, embeddings, shuffle_seed, path: Path):
