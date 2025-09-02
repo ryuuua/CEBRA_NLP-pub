@@ -23,7 +23,7 @@ from src.config_schema import (
 )
 
 
-def make_config(batch_size: int, loss: str = "infonce") -> AppConfig:
+def make_config(batch_size: int, criterion: str = "infonce", conditional: str = "discrete") -> AppConfig:
     cfg = AppConfig(
         paths=PathsConfig(embedding_cache_dir=""),
         dataset=DatasetConfig(
@@ -38,8 +38,9 @@ def make_config(batch_size: int, loss: str = "infonce") -> AppConfig:
         cebra=CEBRAConfig(
             output_dim=2,
             max_iterations=1,
-            conditional="none" if loss == "mse" else "discrete",
-            params={"batch_size": batch_size, "loss": loss},
+            conditional=conditional,
+            criterion=criterion,
+            params={"batch_size": batch_size},
         ),
         evaluation=EvaluationConfig(test_size=0.2, random_state=0, knn_neighbors=1),
         wandb=WandBConfig(project="", run_name="", entity=None),
@@ -76,58 +77,19 @@ def test_train_one_step_no_type_error():
         assert False, f"TypeError raised: {exc}"
 
 
-def test_train_mse_loss():
-    cfg = make_config(batch_size=4, loss="mse")
+def test_train_infomse_loss():
+    cfg = make_config(batch_size=4, criterion="infomse")
     X = np.random.rand(4, 5).astype(np.float32)
-    y = np.random.rand(4, cfg.cebra.output_dim).astype(np.float32)
+    y = np.array([0, 0, 1, 1])
     train_cebra(X, y, cfg, Path("."))
 
 
-def test_mse_integer_labels_auto_one_hot():
-    cfg = make_config(batch_size=4, loss="mse")
-    cfg.cebra.output_dim = 3
+def test_invalid_criterion():
+    cfg = make_config(batch_size=4, criterion="not_real")
     X = np.random.rand(4, 5).astype(np.float32)
-    y = np.array([0, 1, 2, 1])
-    train_cebra(X, y, cfg, Path("."))
-
-
-def test_mse_integer_labels_output_dim_mismatch():
-    cfg = make_config(batch_size=4, loss="mse")
-    X = np.random.rand(4, 5).astype(np.float32)
-    y = np.array([0, 1, 2, 1])
-    train_cebra(X, y, cfg, Path("."))
-    assert cfg.cebra.output_dim == 3
-
-
-def test_classifier_model_tuple_output(monkeypatch):
-    cfg = make_config(batch_size=2, loss="mse")
-    X = np.random.rand(2, 3).astype(np.float32)
-    y = np.random.rand(2, cfg.cebra.output_dim).astype(np.float32)
-
-    class DummyModel(torch.nn.Module):
-        def __init__(self, in_dim):
-            super().__init__()
-            self.linear = torch.nn.Linear(in_dim, cfg.cebra.output_dim)
-            self.classifier = None
-
-        def set_output_num(self, n):
-            self.classifier = torch.nn.Linear(cfg.cebra.output_dim, n)
-
-        def forward(self, x):
-            emb = self.linear(x)
-            pred = self.classifier(emb) if self.classifier is not None else None
-            return emb, pred
-
-    def dummy_build_model(cfg_, num_neurons):
-        return DummyModel(num_neurons)
-
-    monkeypatch.setattr("src.cebra_trainer._build_model", dummy_build_model)
-
-    model = train_cebra(X, y, cfg, Path("."))
-    assert getattr(model, "classifier") is not None
-
+    y = np.array([0, 0, 1, 1])
     with pytest.raises(ValueError):
-        train_cebra(X, None, cfg, Path("."))
+        train_cebra(X, y, cfg, Path("."))
 
 
 def test_distribution_sampling_respects_labels():

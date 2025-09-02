@@ -6,7 +6,7 @@ hydra:
     params:
       dataset: dair-ai,go_emotions
       embedding: bert,roberta,sentence_bert
-      cebra: offset1-model-mse,offset1-model-v4,supervised1-model
+      cebra: offset1-model,offset1-model-v4,supervised1-model
       cebra.output_dim: 2,3,4,5,6,7,8,9,10,11,12,13,14
       cebra.max_iterations: 15000
       cebra.params.batch_size: 512,1024
