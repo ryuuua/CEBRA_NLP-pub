@@ -16,6 +16,16 @@ class DatasetConfig:
     visualization: VisualizationConfig
 
     label_column: Optional[str] = None
+    # When working with multi-label data, either specify multiple
+    # columns containing binary indicators or provide a single column
+    # with delimited label strings. The `label_map` defines the order of
+    # labels in the resulting multi-hot vectors.
+    multi_label: bool = False
+    label_columns: Optional[List[str]] = None
+    label_delimiter: Optional[str] = None
+
+    # Kaggle datasets require a handle to download the data.
+    kaggle_handle: Optional[str] = None
 
     hf_path: Optional[str] = None
     kaggle_handle: Optional[str] = None
