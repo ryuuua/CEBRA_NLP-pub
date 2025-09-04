@@ -1,0 +1,22 @@
+# @package dataset
+
+name: kaggle-multilabel
+source: kaggle
+kaggle_handle: "kashnitsky/hierarchical-text-classification"
+text_column: text
+label_column: labels
+label_delimiter: "|"
+multi_label: true
+
+# Label and visualization settings
+label_map:
+  0: "class_a"
+  1: "class_b"
+  2: "class_c"
+
+visualization:
+  emotion_order: ['class_a', 'class_b', 'class_c']
+  emotion_colors:
+    class_a: '#FF0000'
+    class_b: '#00FF00'
+    class_c: '#0000FF'
