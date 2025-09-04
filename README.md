@@ -32,16 +32,23 @@ python main.py -m hpt=my_sweep
 
 ### Kaggle データセットを使用する
 
-Kaggle の階層型テキスト分類データセットを利用する場合は、データを
-`data/kaggle/hierarchical-text-classification` に配置し、
-以下のようにデータセット設定を切り替えます:
+Kaggle のデータセットを利用する場合は、`dataset.kaggle_handle` に
+対象データセットのハンドルを指定します。`kagglehub` によりデータセットは
+自動的にダウンロードされます:
 
 ```bash
-python main.py dataset=hierarchical_text_classification
+python main.py dataset=hierarchical_text_classification dataset.kaggle_handle=kashnitsky/hierarchical-text-classification
 ```
 
-`conf/paths/default.yaml` の `kaggle_data_dir` を変更することで、データの
-保存場所をカスタマイズできます。
+デフォルトでは `kagglehub` のキャッシュディレクトリに保存されます。保存場所を
+変更したい場合は `paths.kaggle_data_dir` を設定してください:
+
+```bash
+python main.py dataset=hierarchical_text_classification dataset.kaggle_handle=kashnitsky/hierarchical-text-classification paths.kaggle_data_dir=/path/to/data
+```
+
+オフライン環境や独自のディレクトリを使用する場合のみ、データセットを
+`paths.kaggle_data_dir` に手動で配置する必要があります。
 
 ### MSE Loss Targets
 
