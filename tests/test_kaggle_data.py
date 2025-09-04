@@ -36,6 +36,7 @@ def make_kaggle_config() -> AppConfig:
             visualization=VisualizationConfig(emotion_colors={}, emotion_order=[]),
             source="kaggle",
             kaggle_handle="kashnitsky/hierarchical-text-classification",
+
         ),
         embedding=EmbeddingConfig(name="dummy", type="dummy", model_name="dummy"),
         cebra=CEBRAConfig(
@@ -68,6 +69,7 @@ def make_kaggle_multilabel_config() -> AppConfig:
             kaggle_handle="dummy/multilabel",
             multi_label=True,
             label_delimiter="|",
+
         ),
         embedding=EmbeddingConfig(name="dummy", type="dummy", model_name="dummy"),
         cebra=CEBRAConfig(
@@ -122,4 +124,38 @@ def test_kaggle_multilabel(monkeypatch, tmp_path):
     assert texts == ["hello", "world"]
     assert labels.shape == (2, 3)
     assert np.array_equal(labels, np.array([[1, 1, 0], [0, 1, 0]]))
+
+def test_kaggle_multilabel_encoding(monkeypatch, tmp_path):
+    df = pd.DataFrame(
+        {
+            "text": ["t1", "t2"],
+            "label": [np.array([1, 0, 1]), np.array([0, 1, 0])],
+        }
+    )
+    csv_path = tmp_path / "train.csv"
+    csv_path.write_text("dummy")
+
+    def fake_download(handle):
+        assert handle == "kashnitsky/hierarchical-text-classification"
+        return str(tmp_path)
+
+    def fake_read_csv(path):
+        assert path == str(csv_path)
+        return df
+
+    monkeypatch.setattr("src.data.kagglehub.dataset_download", fake_download)
+    monkeypatch.setattr("src.data.pd.read_csv", fake_read_csv)
+    monkeypatch.setattr(pd.Series, "isin", lambda self, values: pd.Series([True] * len(self)))
+
+    cfg = make_kaggle_config()
+    cfg.dataset.label_map = {0: "a", 1: "b", 2: "c"}
+
+    texts, labels, _, _ = load_and_prepare_dataset(cfg)
+
+    assert texts == ["t1", "t2"]
+    labels_matrix = np.stack(labels)
+    assert labels_matrix.shape == (2, 3)
+    assert np.array_equal(labels_matrix, np.array([[1, 0, 1], [0, 1, 0]]))
+    assert set(np.unique(labels_matrix)).issubset({0, 1})
+
 
