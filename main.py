@@ -98,9 +98,11 @@ def main(cfg: AppConfig) -> None:
         if cache is not None:
             cached_ids, cached_embeddings, cached_seed = cache
             if cached_seed == seed:
-                id_to_index = {int(i): idx for idx, i in enumerate(cached_ids)}
+                id_to_index = {str(i): idx for idx, i in enumerate(cached_ids)}
                 try:
-                    X_vectors = np.stack([cached_embeddings[id_to_index[int(i)]] for i in ids])
+                    X_vectors = np.stack(
+                        [cached_embeddings[id_to_index[str(i)]] for i in ids]
+                    )
                 except KeyError:
                     X_vectors = get_embeddings(texts, cfg)
                     save_text_embedding(ids, X_vectors, seed, embedding_cache_path)

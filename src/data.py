@@ -106,7 +106,7 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
         )
         df = df.sample(frac=1, random_state=seed).reset_index(drop=True)
 
-    ids = df["id"].to_numpy()
+    ids = df["id"].astype(str).to_numpy()
 
     if conditional_mode == "none":
         conditional_data = df[["V", "A", "D"]].to_numpy(dtype=np.float32)
