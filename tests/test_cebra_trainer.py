@@ -7,7 +7,7 @@ from cebra.distributions.discrete import DiscreteUniform
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from src.cebra_trainer import train_cebra, normalize_model_architecture
+from src.cebra_trainer import train_cebra, normalize_model_architecture, transform_cebra
 from src.config_schema import (
     AppConfig,
     PathsConfig,
@@ -65,6 +65,18 @@ def test_normalize_model_architecture_invalid(monkeypatch):
     monkeypatch.setattr(cebra.models, "get_options", lambda: ["offset0-model"])
     with pytest.raises(ValueError):
         normalize_model_architecture("unknown-model")
+
+
+def test_transform_cebra_tuple_output():
+    class TupleModel(torch.nn.Module):
+        def forward(self, x):
+            return x + 1, x - 1
+
+    model = TupleModel()
+    X = np.random.rand(2, 3).astype(np.float32)
+    embeddings = transform_cebra(model, X, "cpu")
+    assert isinstance(embeddings, np.ndarray)
+    np.testing.assert_allclose(embeddings, X + 1)
 
 
 def test_train_one_step_no_type_error():

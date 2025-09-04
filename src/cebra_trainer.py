@@ -92,9 +92,10 @@ def transform_cebra(model, X, device):
     was_training = model.training
     model.eval()
     with torch.no_grad():
-        embeddings = (
-            model(torch.as_tensor(X, dtype=torch.float32).to(device)).cpu().numpy()
-        )
+        output = model(torch.as_tensor(X, dtype=torch.float32).to(device))
+        if isinstance(output, tuple):
+            output = output[0]
+        embeddings = output.cpu().numpy()
     if was_training:
         model.train()
     return embeddings

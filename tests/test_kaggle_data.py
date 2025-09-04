@@ -35,6 +35,7 @@ def make_kaggle_config() -> AppConfig:
             label_map={0: "a", 1: "b"},
             visualization=VisualizationConfig(emotion_colors={}, emotion_order=[]),
             source="kaggle",
+            kaggle_handle="kashnitsky/hierarchical-text-classification",
         ),
         embedding=EmbeddingConfig(name="dummy", type="dummy", model_name="dummy"),
         cebra=CEBRAConfig(
