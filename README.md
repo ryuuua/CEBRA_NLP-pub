@@ -30,6 +30,7 @@ torchrun --nproc_per_node=2 main.py
 python main.py -m hpt=my_sweep
 ```
 
+
 ### TREC データセットでの実行
 
 質問分類タスク [TREC](https://huggingface.co/datasets/trec) を利用する場合は、以下のようにデータセットを切り替えます:
@@ -100,7 +101,7 @@ run = wandb.init(
 ```
 
 実験結果のファイルを W&B の Artifact として保存する例:
-=======
+
 
 
 ## Conditional Modes

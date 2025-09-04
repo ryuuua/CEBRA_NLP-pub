@@ -1,6 +1,7 @@
 # @package dataset
 name: hierarchical_text_classification
 source: kaggle
+kaggle_handle: kashnitsky/hierarchical-text-classification
 data_files: train.csv
 text_column: text
 label_column: label
