@@ -121,4 +121,4 @@ def test_trec_loading(monkeypatch):
     assert texts == ["What is AI?", "Who invented AI?", "When was AI invented?"]
     assert labels.tolist() == [0, 3, 5]
     assert np.array_equal(time_indices, np.arange(3))
-    assert np.array_equal(ids, np.arange(3))
+    assert np.array_equal(ids, np.arange(3).astype(str))
