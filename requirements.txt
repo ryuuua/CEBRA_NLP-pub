@@ -1,5 +1,5 @@
 cebra
-datasets
+datasets<3.0
 gensim
 
 hydra-core
