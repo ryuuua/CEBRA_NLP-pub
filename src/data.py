@@ -31,11 +31,23 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
         all_splits = [pd.DataFrame(dataset[split]) for split in dataset.keys()]
         df = pd.concat(all_splits, ignore_index=True)
     elif dataset_cfg.source == "kaggle":
-        path = kagglehub.dataset_download("kashnitsky/hierarchical-text-classification")
-        csv_files = [f for f in os.listdir(path) if f.endswith(".csv")]
-        if not csv_files:
-            raise FileNotFoundError("No CSV files found in Kaggle dataset directory")
-        csv_path = os.path.join(path, csv_files[0])
+        if dataset_cfg.kaggle_handle:
+            path = kagglehub.dataset_download(dataset_cfg.kaggle_handle)
+        else:
+            path = cfg.paths.kaggle_data_dir
+
+        if dataset_cfg.data_files:
+            csv_path = os.path.join(path, dataset_cfg.data_files)
+            if not os.path.exists(csv_path):
+                raise FileNotFoundError(
+                    f"Specified data file not found in Kaggle dataset directory: {csv_path}"
+                )
+        else:
+            csv_files = [f for f in os.listdir(path) if f.endswith(".csv")]
+            if not csv_files:
+                raise FileNotFoundError("No CSV files found in Kaggle dataset directory")
+            csv_path = os.path.join(path, csv_files[0])
+
         df = pd.read_csv(csv_path)
     else:
         raise ValueError(
