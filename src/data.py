@@ -37,15 +37,6 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
                 "dataset.kaggle_handle must be set when dataset.source is 'kaggle'"
             )
         path = kagglehub.dataset_download(dataset_cfg.kaggle_handle)
-        csv_files = [f for f in os.listdir(path) if f.endswith(".csv")]
-        if not csv_files:
-            raise FileNotFoundError("No CSV files found in Kaggle dataset directory")
-        csv_path = os.path.join(path, csv_files[0])
-
-        if dataset_cfg.kaggle_handle:
-            path = kagglehub.dataset_download(dataset_cfg.kaggle_handle)
-        else:
-            path = cfg.paths.kaggle_data_dir
 
         if dataset_cfg.data_files:
             csv_path = os.path.join(path, dataset_cfg.data_files)
