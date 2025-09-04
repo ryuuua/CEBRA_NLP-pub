@@ -30,6 +30,14 @@ torchrun --nproc_per_node=2 main.py
 python main.py -m hpt=my_sweep
 ```
 
+### TREC データセットを使用する
+
+TREC の質問分類データセットを利用する場合は、以下のようにデータセット設定を切り替えて実行します:
+
+```bash
+python main.py dataset=trec
+```
+
 ### Kaggle データセットを使用する
 
 Kaggle の階層型テキスト分類データセットを利用する場合は、データを
