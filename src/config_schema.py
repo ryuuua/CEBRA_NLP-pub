@@ -90,7 +90,9 @@ class PathsConfig:
 @dataclass
 class ConsistencyCheckConfig:
     enabled: bool = True  # チェックを有効にするか
+    mode: str = "runs"     # "runs" or "datasets"
     num_runs: int = 5     # 何回モデルを訓練するか
+    dataset_ids: List[str] = field(default_factory=list)
 
 
 @dataclass
