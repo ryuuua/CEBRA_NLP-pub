@@ -231,7 +231,9 @@ def run_consistency_check(
     cfg: AppConfig,
     output_dir: Path,
     y_valid=None,
-
+    embeddings_list=None,
+    labels_list=None,
+    dataset_ids=None,
     enable_plots: bool = True,
     step: int | None = None,
 ):
@@ -305,6 +307,31 @@ def run_consistency_check(
             ax.figure.savefig(plot_path)
 
             # Figureを閉じる
+            plt.close(ax.figure)
+            wandb.save(str(plot_path))
+
+    if (
+        embeddings_list is not None
+        and labels_list is not None
+        and dataset_ids is not None
+    ):
+        print("\nComputing consistency across datasets...")
+        scores, pairs, ids_datasets = consistency_score(
+            embeddings=embeddings_list,
+            labels=labels_list,
+            dataset_ids=dataset_ids,
+            between="datasets",
+        )
+
+        dataset_mean = scores.mean()
+        wandb.log({"consistency_score_datasets": dataset_mean}, step=step)
+        print(f"Mean consistency score (datasets): {dataset_mean:.4f}")
+
+        if enable_plots:
+            ax = plot_consistency(scores, pairs, ids_datasets)
+            plot_path = output_dir / "consistency_plot_datasets.png"
+
+            ax.figure.savefig(plot_path)
             plt.close(ax.figure)
             wandb.save(str(plot_path))
 
