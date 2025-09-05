@@ -1,3 +1,5 @@
 # conf/consistency_check/default.yaml
 enabled: true
+mode: runs
 num_runs: 5
+dataset_ids: []

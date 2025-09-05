@@ -119,4 +119,24 @@ run = wandb.init(
 - `discrete`: 離散ラベルを使用
 - `custom`: 任意の条件データを使用
 
+## Consistency Check Modes
+
+`consistency_check.mode` では一貫性評価の方法を選択できます。
+
+- `runs` (デフォルト): 同じ設定で複数回モデルを学習し，ラン間の一貫性を計算します。
+- `datasets`: 複数の言語モデルで得た埋め込みを比較し，データセット間の一貫性を計算します。
+
+`datasets` モードを使用する場合は，`consistency_check.dataset_ids` に使用する埋め込み
+モデルの識別子をリストで指定してください。識別子は `conf/embedding/` 内の YAML
+ファイル名と一致させます。例:
+
+```bash
+python main.py \
+    consistency_check.mode=datasets \
+    consistency_check.dataset_ids='[bert,roberta]'
+```
+
+各モデルに対して同じラベル (`conditional_data`) と ID を用いて埋め込みが生成され，
+それらが `run_consistency_check` に渡されます。
+
 

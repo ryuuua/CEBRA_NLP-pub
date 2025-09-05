@@ -5,8 +5,10 @@ import torch
 import wandb
 import pandas as pd
 from pathlib import Path
-from src.config_schema import AppConfig
+from copy import deepcopy
+from src.config_schema import AppConfig, EmbeddingConfig
 from hydra.core.hydra_config import HydraConfig
+from hydra.utils import get_original_cwd
 from src.data import load_and_prepare_dataset
 from src.utils import get_embedding_cache_path, save_text_embedding, load_text_embedding
 from src.embeddings import get_embeddings
@@ -17,9 +19,12 @@ from src.cebra_trainer import (
     normalize_model_architecture,
 )
 from sklearn.model_selection import train_test_split
-from src.results import (save_interactive_plot, #save_static_2d_plots,
-                         run_knn_classification, run_knn_regression,
-                         run_consistency_check)
+from src.results import (
+    save_interactive_plot,  # save_static_2d_plots,
+    run_knn_classification,
+    run_knn_regression,
+    run_consistency_check,
+)
 from dotenv import load_dotenv
 import os
 import torch.distributed as dist
@@ -232,14 +237,38 @@ def main(cfg: AppConfig) -> None:
         # --- 7. Consistency Check ---
         if cfg.consistency_check.enabled:
             print("\n--- Step 7: Running Consistency Check ---")
-            run_consistency_check(
-                X_train,
-                labels_for_training,
-                X_valid,
-                cfg,
-                output_dir,
-                enable_plots=cfg.evaluation.enable_plots,
-            )
+            if cfg.consistency_check.mode == "datasets":
+                embeddings_list = []
+                embedding_dir = Path(get_original_cwd()) / "conf" / "embedding"
+                for emb_name in cfg.consistency_check.dataset_ids:
+                    emb_path = embedding_dir / f"{emb_name}.yaml"
+                    emb_conf = OmegaConf.load(emb_path)
+                    emb_dict = OmegaConf.to_container(emb_conf, resolve=True)
+                    tmp_cfg = deepcopy(cfg)
+                    tmp_cfg.embedding = EmbeddingConfig(**emb_dict)
+                    embeddings_list.append(get_embeddings(texts, tmp_cfg))
+
+                labels_list = [conditional_data for _ in embeddings_list]
+                run_consistency_check(
+                    None,
+                    None,
+                    None,
+                    cfg,
+                    output_dir,
+                    dataset_embeddings=embeddings_list,
+                    labels=labels_list,
+                    dataset_ids=cfg.consistency_check.dataset_ids,
+                    enable_plots=cfg.evaluation.enable_plots,
+                )
+            else:
+                run_consistency_check(
+                    X_train,
+                    labels_for_training,
+                    X_valid,
+                    cfg,
+                    output_dir,
+                    enable_plots=cfg.evaluation.enable_plots,
+                )
     finally:
         if wandb.run is not None:
             wandb.finish()

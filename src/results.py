@@ -231,13 +231,42 @@ def run_consistency_check(
     cfg: AppConfig,
     output_dir: Path,
     y_valid=None,
-
+    dataset_embeddings=None,
+    labels=None,
+    dataset_ids=None,
     enable_plots: bool = True,
     step: int | None = None,
 ):
 
     print("\n--- Step 6: Running Consistency Check ---")
     check_cfg = cfg.consistency_check
+
+    # Between-datasets consistency
+    if check_cfg.mode == "datasets":
+        if dataset_embeddings is None or labels is None:
+            raise ValueError(
+                "dataset_embeddings and labels must be provided when mode='datasets'"
+            )
+        scores, pairs, ids_runs = consistency_score(
+            embeddings=dataset_embeddings,
+            labels=labels,
+            dataset_ids=dataset_ids,
+            between="datasets",
+        )
+
+        mean_score = scores.mean()
+        wandb.log({"consistency_score_datasets": mean_score}, step=step)
+        print(f"Mean consistency score (datasets): {mean_score:.4f}")
+
+        if enable_plots:
+            ax = plot_consistency(scores, pairs, ids_runs)
+            plot_path = output_dir / "consistency_plot_datasets.png"
+            ax.figure.savefig(plot_path)
+            plt.close(ax.figure)
+            wandb.save(str(plot_path))
+
+        return mean_score, None
+
     num_runs = check_cfg.num_runs
 
     # Disable persistent DataLoader workers to prevent accumulation across runs
@@ -253,11 +282,9 @@ def run_consistency_check(
             max_iterations=cfg.cebra.max_iterations,
             batch_size=cfg.cebra.params.get("batch_size", 512),
             learning_rate=cfg.cebra.params.get("learning_rate", 1e-3),
-
             conditional=(
                 None if cfg.cebra.conditional == "None" else cfg.cebra.conditional
             ),
-
             device=cfg.device,
         )
         if y_train is None:
