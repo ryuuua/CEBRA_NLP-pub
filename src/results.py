@@ -109,39 +109,42 @@ def save_interactive_plot(
         print("--------------------------")
 
 
-    # def save_static_2d_plots(
-    #     embeddings, text_labels, palette, title_prefix, output_dir: Path, hue_order: list
-    # ):
-    #     """Generates and saves 2D static plots using PCA and UMAP."""
-    #     print(f"Generating static 2D scatter plots using PCA and UMAP...")
+def save_static_2d_plots(
+    embeddings,
+    text_labels,
+    palette,
+    title_prefix,
+    output_dir: Path,
+    hue_order: list,
+):
+    """Generates and saves 2D static plots using PCA and UMAP."""
+    print("Generating static 2D scatter plots using PCA and UMAP...")
 
-    #     pca_model = PCA(n_components=2)
-    #     # umap_model = umap.UMAP(n_components=2, n_neighbors=15, min_dist=0.1, random_state=42)
-    #     # random_stateを削除し、n_jobs=-1（利用可能な全コアを使用）を追加
-    #     umap_model = umap.UMAP(n_components=2, n_neighbors=15, min_dist=0.1, n_jobs=-1)
-    #     X_pca = pca_model.fit_transform(embeddings)
-    #     X_umap = umap_model.fit_transform(embeddings)
+    pca_model = PCA(n_components=2)
+    # Use all available cores with n_jobs=-1 and omit random_state
+    umap_model = umap.UMAP(n_components=2, n_neighbors=15, min_dist=0.1, n_jobs=-1)
+    X_pca = pca_model.fit_transform(embeddings)
+    X_umap = umap_model.fit_transform(embeddings)
 
-    #     for X_reduced, name in [(X_pca, "PCA"), (X_umap, "UMAP")]:
-    #         plt.figure(figsize=(12, 10))
-    #         sns.scatterplot(
-    #             x=X_reduced[:, 0],
-    #             y=X_reduced[:, 1],
-    #             hue=text_labels,
-    #             palette=palette,
-    #             s=10,
-    #             hue_order=hue_order,
-    #         )
-    #         # sns.scatterplot(x=X_reduced[:, 0], y=X_reduced[:, 1], hue=text_labels, palette=palette, s=10)
-    #         plt.title(f"{title_prefix} with {name}")
-    #         plt.xlabel(f"{name} 1")
-    #         plt.ylabel(f"{name} 2")
-    #         plt.legend(title="Label", bbox_to_anchor=(1.05, 1), loc="upper left")
-    #         plt.tight_layout()
-    #         static_plot_file = output_dir / f"static_{name}_plot.png"
-    #         plt.savefig(static_plot_file)
-    #         plt.close()
-    #         print(f"Saved static {name} plot to {static_plot_file}")
+    for X_reduced, name in [(X_pca, "PCA"), (X_umap, "UMAP")]:
+        plt.figure(figsize=(12, 10))
+        sns.scatterplot(
+            x=X_reduced[:, 0],
+            y=X_reduced[:, 1],
+            hue=text_labels,
+            palette=palette,
+            s=10,
+            hue_order=hue_order,
+        )
+        plt.title(f"{title_prefix} with {name}")
+        plt.xlabel(f"{name} 1")
+        plt.ylabel(f"{name} 2")
+        plt.legend(title="Label", bbox_to_anchor=(1.05, 1), loc="upper left")
+        plt.tight_layout()
+        static_plot_file = output_dir / f"static_{name}_plot.png"
+        plt.savefig(static_plot_file)
+        plt.close()
+        print(f"Saved static {name} plot to {static_plot_file}")
 
 
 def run_knn_classification(
