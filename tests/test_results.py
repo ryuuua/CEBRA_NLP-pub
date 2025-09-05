@@ -63,6 +63,36 @@ def test_consistency_check_runs_without_value_error(tmp_path):
             pytest.fail(f"Consistency check raised ValueError: {exc}")
 
 
+def test_consistency_check_across_datasets(tmp_path):
+    cfg = make_config()
+    X_train = np.random.rand(8, 5).astype(np.float32)
+    X_valid = np.random.rand(4, 5).astype(np.float32)
+    y_train = np.array([0, 0, 0, 0, 1, 1, 1, 1])
+
+    embeddings_list = [np.random.rand(120, 3), np.random.rand(120, 3)]
+    labels_list = [np.linspace(0, 1, 120), np.linspace(0, 1, 120)]
+    dataset_ids = ["d1", "d2"]
+
+    os.environ["WANDB_MODE"] = "offline"
+    with wandb.init(project="test-exp", dir=str(tmp_path)):
+        try:
+            run_consistency_check(
+                X_train,
+                y_train,
+                X_valid,
+                cfg,
+                tmp_path,
+                embeddings_list=embeddings_list,
+                labels_list=labels_list,
+                dataset_ids=dataset_ids,
+                enable_plots=False,
+            )
+        except ValueError as exc:
+            pytest.fail(
+                f"Consistency check across datasets raised ValueError: {exc}"
+            )
+
+
 def test_knn_classification_skips_plots(tmp_path):
     train_embeddings = np.random.rand(8, 2)
     valid_embeddings = np.random.rand(4, 2)
