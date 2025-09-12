@@ -16,6 +16,7 @@ from src.cebra_trainer import (
     train_cebra,
     save_cebra_model,
     transform_cebra,
+    save_cebra_embeddings,
     normalize_model_architecture,
 )
 from sklearn.model_selection import train_test_split
@@ -146,6 +147,11 @@ def main(cfg: AppConfig) -> None:
         # --- 5. Transform Data ---
         print("\n--- Step 5: Transforming data with trained CEBRA model ---")
         cebra_embeddings_full = transform_cebra(cebra_model, X_vectors, cfg.device)
+        if cfg.cebra.save_embeddings:
+            emb_path = save_cebra_embeddings(cebra_embeddings_full, output_dir)
+            emb_artifact = wandb.Artifact(name=emb_path.stem, type="embeddings")
+            emb_artifact.add_file(str(emb_path))
+            wandb.log_artifact(emb_artifact)
         cebra_train_embeddings = transform_cebra(cebra_model, X_train, cfg.device)
         cebra_valid_embeddings = transform_cebra(cebra_model, X_valid, cfg.device)
 

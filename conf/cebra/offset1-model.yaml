@@ -13,6 +13,8 @@ num_workers: 2
 pin_memory: true
 persistent_workers: true
 prefetch_factor: 2
+# Save embeddings to disk for reuse
+save_embeddings: true
 # Nested parameters for the model
 params:
   batch_size: 512

@@ -62,6 +62,7 @@ class CEBRAConfig:
     pin_memory: bool = True
     persistent_workers: bool = True
     prefetch_factor: int = 2
+    save_embeddings: bool = False
 
 @dataclass
 class EvaluationConfig:
