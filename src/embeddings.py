@@ -14,6 +14,23 @@ def get_hf_transformer_embeddings(texts, model_name, device):
     from transformers import AutoTokenizer, AutoModel
 
     tokenizer = AutoTokenizer.from_pretrained(model_name)
+
+    if getattr(tokenizer, "pad_token", None) is None:
+        fallback_token = None
+        for attr in ("eos_token", "sep_token", "cls_token", "bos_token"):
+            token = getattr(tokenizer, attr, None)
+            if token is not None:
+                fallback_token = token
+                break
+        if fallback_token is not None:
+            tokenizer.pad_token = fallback_token
+            if getattr(tokenizer, "pad_token_id", None) is None and hasattr(
+                tokenizer, "convert_tokens_to_ids"
+            ):
+                pad_token_id = tokenizer.convert_tokens_to_ids(fallback_token)
+                if pad_token_id is not None:
+                    tokenizer.pad_token_id = pad_token_id
+
     model = AutoModel.from_pretrained(model_name).to(device)
     embeddings = []
     with torch.no_grad():
@@ -27,8 +44,12 @@ def get_hf_transformer_embeddings(texts, model_name, device):
                 max_length=128,
             ).to(device)
             outputs = model(**inputs)
-            # Use the [CLS] token's last hidden state
-            batch_embeddings = outputs.last_hidden_state[:, 0, :].cpu().numpy()
+            attention_mask = inputs["attention_mask"]
+            last_hidden_state = outputs.last_hidden_state
+            mask = attention_mask.unsqueeze(-1).type_as(last_hidden_state)
+            summed = (last_hidden_state * mask).sum(dim=1)
+            counts = mask.sum(dim=1).clamp(min=1e-9)
+            batch_embeddings = (summed / counts).cpu().numpy()
             embeddings.append(batch_embeddings)
     return np.vstack(embeddings)
 
