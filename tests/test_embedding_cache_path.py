@@ -1,7 +1,10 @@
 from pathlib import Path
 from typing import Optional
+import sys
 
 from omegaconf import OmegaConf
+
+sys.path.append(str(Path(__file__).resolve().parents[1]))
 
 from src.utils import get_embedding_cache_path
 
@@ -20,6 +23,13 @@ def test_get_embedding_cache_path_no_shuffle():
     cfg = _make_cfg(False, 123)
     path = get_embedding_cache_path(cfg)
     assert path == Path("./dataset__embedding.npz")
+
+
+def test_get_embedding_cache_path_with_slash_in_name():
+    cfg = _make_cfg(False)
+    cfg.embedding.name = "google/embeddinggemma-300M"
+    path = get_embedding_cache_path(cfg)
+    assert path == Path("./dataset__google__embeddinggemma-300M.npz")
 
 
 def test_get_embedding_cache_path_with_seed():

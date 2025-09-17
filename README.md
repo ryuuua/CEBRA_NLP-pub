@@ -10,6 +10,17 @@
 python main.py
 ```
 
+### 埋め込みモデルのプリセット
+
+`conf/embedding/` には Hugging Face 上の埋め込みモデルを参照するプリセットが追加されています。CLI からは `embedding=<プリセット名>` を指定して切り替えます (例: `python main.py embedding=embeddinggemma`)。
+
+- `embeddinggemma`: `google/embeddinggemma-300M` を利用する 1024 次元のモデル。Matryoshka 表現学習に対応しているため、必要に応じて埋め込みベクトルを 512 次元や 256 次元にトリミングして高速化できます。
+- `qwen3_embedding`: `Qwen/Qwen3-1.5B-Text-Embedding` を利用する 1536 次元モデル。1.5B パラメータ規模のため、GPU (少なくとも 16GB メモリを推奨) での推論が現実的です。
+- `granite_embedding`: `ibm-granite/granite-embedding-english-r2` を利用する 768 次元モデル。IBM Granite の英語向け最新リリースで、CPU でも比較的扱いやすいサイズです。
+- `jina_embedding`: `jinaai/jina-embeddings-v2-base-en` を利用する 1024 次元モデル。英語検索・要約用途向けの Sentence-Transformers 互換モデルです。
+
+`embedding.name` や `model_name` の値には Hugging Face のリポジトリ ID がそのまま入るため、キャッシュファイル名は自動的にスラッシュをエスケープした形 (`google__embeddinggemma-300M` など) になります。
+
 Mac (CUDA/MPS/CPU) での実行 (自動デバイス検出):
 
 ```bash
