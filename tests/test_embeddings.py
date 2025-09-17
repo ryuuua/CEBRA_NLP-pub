@@ -1,10 +1,13 @@
 import numpy as np
+import pytest
 import torch
 from pathlib import Path
 from types import SimpleNamespace
 import sys
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
+
+from huggingface_hub.errors import GatedRepoError
 
 from src.embeddings import get_hf_transformer_embeddings
 
@@ -104,3 +107,22 @@ def test_get_hf_transformer_embeddings_without_pad_token(monkeypatch):
     np.testing.assert_allclose(embeddings, np.array([[1.5], [3.0]]))
     assert dummy_tokenizer.pad_token == dummy_tokenizer.eos_token
     assert dummy_tokenizer.pad_token_id == dummy_tokenizer.eos_token_id
+
+
+def test_get_hf_transformer_embeddings_gated_repo(monkeypatch):
+    def fake_tokenizer_from_pretrained(model_name):
+        raise GatedRepoError("gated repo", response=None)
+
+    monkeypatch.setattr(
+        "transformers.AutoTokenizer.from_pretrained", fake_tokenizer_from_pretrained
+    )
+
+    with pytest.raises(RuntimeError) as exc_info:
+        get_hf_transformer_embeddings(
+            ["hello"], "google/embeddinggemma-300M", device="cpu"
+        )
+
+    message = str(exc_info.value)
+    assert "https://huggingface.co/google/embeddinggemma-300M" in message
+    assert "huggingface-cli login" in message
+    assert "sentence-transformers/all-MiniLM-L6-v2" in message

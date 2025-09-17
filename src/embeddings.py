@@ -12,8 +12,22 @@ if TYPE_CHECKING:
 def get_hf_transformer_embeddings(texts, model_name, device):
     """Generates embeddings using a standard Hugging Face Transformer (BERT, RoBERTa)."""
     from transformers import AutoTokenizer, AutoModel
+    from huggingface_hub.errors import GatedRepoError
 
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    def _raise_access_error(exc: Exception) -> None:
+        guidance = (
+            f"Unable to download Hugging Face model '{model_name}'. "
+            "If you are selecting the gated `google/embeddinggemma-300M` embeddings you must request access at "
+            "https://huggingface.co/google/embeddinggemma-300M, accept the terms of use, and authenticate with a Hugging Face "
+            "token (for example by running `huggingface-cli login`). If access is not available, update your configuration "
+            "to use a public embedding model such as `sentence-transformers/all-MiniLM-L6-v2`."
+        )
+        raise RuntimeError(f"{guidance} Original error: {exc}") from exc
+
+    try:
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+    except (GatedRepoError, OSError) as exc:
+        _raise_access_error(exc)
 
     if getattr(tokenizer, "pad_token", None) is None:
         fallback_token = None
@@ -30,8 +44,10 @@ def get_hf_transformer_embeddings(texts, model_name, device):
                 pad_token_id = tokenizer.convert_tokens_to_ids(fallback_token)
                 if pad_token_id is not None:
                     tokenizer.pad_token_id = pad_token_id
-
-    model = AutoModel.from_pretrained(model_name).to(device)
+    try:
+        model = AutoModel.from_pretrained(model_name).to(device)
+    except (GatedRepoError, OSError) as exc:
+        _raise_access_error(exc)
     embeddings = []
     with torch.no_grad():
         for i in tqdm(range(0, len(texts), 32), desc=f"Vectorizing with {model_name}"):
