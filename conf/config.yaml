@@ -32,6 +32,6 @@ wandb:
 #   region: ${oc.env:AWS_DEFAULT_REGION, us-east-1}
 #   s3_signature_version: ${oc.env:AWS_S3_SIGNATURE_VERSION, s3v4}
 ddp:
-  world_size: 1
+  world_size: 2
   rank: 0
   local_rank: 0
