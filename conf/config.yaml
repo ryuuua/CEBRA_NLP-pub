@@ -3,7 +3,7 @@ defaults:
   - paths: default
   - dataset: dair-ai
   - embedding: bert
-  - cebra: offset1-model
+  - cebra: offset1-model-lr
   - consistency_check: default
   - hpt: my_sweep
   - _self_
@@ -11,7 +11,7 @@ defaults:
 device: ${oc.env:DEVICE, cpu}
 
 reproducibility:
-  seed: 42
+  seed: 7
   deterministic: false
   cudnn_benchmark: false
 
