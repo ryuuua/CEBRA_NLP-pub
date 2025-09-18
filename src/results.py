@@ -253,13 +253,13 @@ def run_consistency_check(
 
     # Between-datasets consistency
     if check_cfg.mode == "datasets":
-        if dataset_embeddings is None or labels is None:
+        if dataset_embeddings is None or labels_list is None:
             raise ValueError(
-                "dataset_embeddings and labels must be provided when mode='datasets'"
+                "dataset_embeddings and labels_list must be provided when mode='datasets'"
             )
         scores, pairs, ids_runs = consistency_score(
             embeddings=dataset_embeddings,
-            labels=labels,
+            labels=labels_list,
             dataset_ids=dataset_ids,
             between="datasets",
         )

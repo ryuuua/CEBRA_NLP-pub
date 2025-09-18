@@ -93,6 +93,43 @@ def test_consistency_check_across_datasets(tmp_path):
             )
 
 
+def test_consistency_check_datasets_mode_uses_labels_argument(tmp_path, monkeypatch):
+    cfg = make_config()
+    cfg.consistency_check.mode = "datasets"
+
+    X_train = np.random.rand(4, 3).astype(np.float32)
+    X_valid = np.random.rand(2, 3).astype(np.float32)
+    y_train = np.array([0, 1, 0, 1])
+
+    dataset_embeddings = [np.random.rand(5, 3), np.random.rand(5, 3)]
+    labels_list = [np.arange(5), np.arange(5)]
+    dataset_ids_list = ["d1", "d2"]
+    expected_scores = np.array([0.3, 0.7])
+
+    def fake_consistency_score(*, embeddings, labels, dataset_ids, between):
+        assert embeddings is dataset_embeddings
+        assert labels is labels_list
+        assert dataset_ids is dataset_ids_list
+        assert between == "datasets"
+        return expected_scores, [("d1", "d2")], ["run0"]
+
+    monkeypatch.setattr("src.results.consistency_score", fake_consistency_score)
+
+    mean_score, _ = run_consistency_check(
+        X_train,
+        y_train,
+        X_valid,
+        cfg,
+        tmp_path,
+        dataset_embeddings=dataset_embeddings,
+        labels_list=labels_list,
+        dataset_ids=dataset_ids_list,
+        enable_plots=False,
+    )
+
+    assert mean_score == pytest.approx(expected_scores.mean())
+
+
 def test_knn_classification_skips_plots(tmp_path):
     train_embeddings = np.random.rand(8, 2)
     valid_embeddings = np.random.rand(4, 2)
