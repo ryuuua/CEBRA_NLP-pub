@@ -62,30 +62,35 @@ def main(cfg: AppConfig) -> None:
             cfg.device = "cuda"
     output_dir = Path(HydraConfig.get().run.dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    run = None
+    run_id = None
     try:
 
         # Initialize Weights & Biases
-        run_name = HydraConfig.get().job.name
-        run = wandb.init(
-            project=cfg.wandb.project,
-            entity=cfg.wandb.entity,
-            name=run_name,
-            config=OmegaConf.to_container(cfg, resolve=True),
-        )
-        run_id = run.id
-        print(f"W&B Run Name: {run_name}, Run ID: {run_id}")
-        (output_dir / "wandb_run_id.txt").write_text(run_id)
+        if is_main_process:
+            run_name = HydraConfig.get().job.name
+            run = wandb.init(
+                project=cfg.wandb.project,
+                entity=cfg.wandb.entity,
+                name=run_name,
+                config=OmegaConf.to_container(cfg, resolve=True),
+            )
+            if run is not None:
+                run_id = run.id
+                print(f"W&B Run Name: {run_name}, Run ID: {run_id}")
+                (output_dir / "wandb_run_id.txt").write_text(run_id)
 
         arch = normalize_model_architecture(cfg.cebra.model_architecture)
         cfg.cebra.model_architecture = arch
-        wandb.config.update(
-            {
-                "cebra_output_dim": cfg.cebra.output_dim,
-                "cebra_max_iterations": cfg.cebra.max_iterations,
-                "cebra_conditional": cfg.cebra.conditional,
-                "cebra_model_architecture": arch,
-            }
-        )
+        if is_main_process and wandb.run is not None:
+            wandb.config.update(
+                {
+                    "cebra_output_dim": cfg.cebra.output_dim,
+                    "cebra_max_iterations": cfg.cebra.max_iterations,
+                    "cebra_conditional": cfg.cebra.conditional,
+                    "cebra_model_architecture": arch,
+                }
+            )
 
         # --- 1. Load Dataset ---
         print("\n--- Step 1: Loading dataset ---")
@@ -140,18 +145,20 @@ def main(cfg: AppConfig) -> None:
         model_path = save_cebra_model(cebra_model, output_dir)
 
 
-        model_artifact = wandb.Artifact(name=model_path.stem, type="model")
-        model_artifact.add_file(str(model_path))
-        wandb.log_artifact(model_artifact)
+        if is_main_process and wandb.run is not None:
+            model_artifact = wandb.Artifact(name=model_path.stem, type="model")
+            model_artifact.add_file(str(model_path))
+            wandb.log_artifact(model_artifact)
         
         # --- 5. Transform Data ---
         print("\n--- Step 5: Transforming data with trained CEBRA model ---")
         cebra_embeddings_full = transform_cebra(cebra_model, X_vectors, cfg.device)
         if cfg.cebra.save_embeddings:
             emb_path = save_cebra_embeddings(cebra_embeddings_full, output_dir)
-            emb_artifact = wandb.Artifact(name=emb_path.stem, type="embeddings")
-            emb_artifact.add_file(str(emb_path))
-            wandb.log_artifact(emb_artifact)
+            if is_main_process and wandb.run is not None:
+                emb_artifact = wandb.Artifact(name=emb_path.stem, type="embeddings")
+                emb_artifact.add_file(str(emb_path))
+                wandb.log_artifact(emb_artifact)
         cebra_train_embeddings = transform_cebra(cebra_model, X_train, cfg.device)
         cebra_valid_embeddings = transform_cebra(cebra_model, X_valid, cfg.device)
 
@@ -182,7 +189,11 @@ def main(cfg: AppConfig) -> None:
                     "Interactive CEBRA (Discrete)",
                     interactive_path,
                 )
-                if interactive_path.exists():
+                if (
+                    interactive_path.exists()
+                    and is_main_process
+                    and wandb.run is not None
+                ):
                     vis_artifact = wandb.Artifact(
                         name=interactive_path.stem, type="evaluation"
                     )
@@ -190,10 +201,11 @@ def main(cfg: AppConfig) -> None:
                     wandb.log_artifact(vis_artifact)
                 save_static_2d_plots(cebra_embeddings_full, text_labels_full, palette, "CEBRA Embeddings (Discrete)", output_dir, order)
 
-                static_artifact = wandb.Artifact("cebra-static-plots", type="evaluation")
-                static_artifact.add_file(str(output_dir / "static_PCA_plot.png"))
-                static_artifact.add_file(str(output_dir / "static_UMAP_plot.png"))
-                wandb.log_artifact(static_artifact)
+                if is_main_process and wandb.run is not None:
+                    static_artifact = wandb.Artifact("cebra-static-plots", type="evaluation")
+                    static_artifact.add_file(str(output_dir / "static_PCA_plot.png"))
+                    static_artifact.add_file(str(output_dir / "static_UMAP_plot.png"))
+                    wandb.log_artifact(static_artifact)
 
             # 評価
             accuracy, report = run_knn_classification(
@@ -202,12 +214,14 @@ def main(cfg: AppConfig) -> None:
                 label_map=label_map, output_dir=output_dir, knn_neighbors=cfg.evaluation.knn_neighbors,
                 enable_plots=cfg.evaluation.enable_plots
             )
-            wandb.log({"knn_accuracy": accuracy})
+            if is_main_process and wandb.run is not None:
+                wandb.log({"knn_accuracy": accuracy})
             report_path = output_dir / "classification_report.json"
             pd.Series(report).to_json(report_path, indent=4)
-            report_artifact = wandb.Artifact(name=report_path.stem, type="evaluation")
-            report_artifact.add_file(str(report_path))
-            wandb.log_artifact(report_artifact)
+            if is_main_process and wandb.run is not None:
+                report_artifact = wandb.Artifact(name=report_path.stem, type="evaluation")
+                report_artifact.add_file(str(report_path))
+                wandb.log_artifact(report_artifact)
 
         elif cfg.cebra.conditional == 'none':
             # [None CASE]
@@ -224,7 +238,11 @@ def main(cfg: AppConfig) -> None:
                     title="Interactive CEBRA (None - Colored by Valence)",
                     output_path=interactive_path
                 )
-                if interactive_path.exists():
+                if (
+                    interactive_path.exists()
+                    and is_main_process
+                    and wandb.run is not None
+                ):
                     vis_artifact = wandb.Artifact(
                         name=interactive_path.stem, type="evaluation"
                     )
@@ -238,7 +256,8 @@ def main(cfg: AppConfig) -> None:
                 y_train=conditional_train, y_valid=conditional_valid,
                 output_dir=output_dir, knn_neighbors=cfg.evaluation.knn_neighbors
             )
-            wandb.log({"knn_regression_mse": mse, "knn_regression_r2": r2})
+            if is_main_process and wandb.run is not None:
+                wandb.log({"knn_regression_mse": mse, "knn_regression_r2": r2})
 
         # --- 7. Consistency Check ---
         if cfg.consistency_check.enabled:
@@ -276,7 +295,7 @@ def main(cfg: AppConfig) -> None:
                     enable_plots=cfg.evaluation.enable_plots,
                 )
     finally:
-        if wandb.run is not None:
+        if is_main_process and wandb.run is not None:
             wandb.finish()
         if cfg.ddp.world_size > 1 and dist.is_initialized():
             dist.destroy_process_group()
