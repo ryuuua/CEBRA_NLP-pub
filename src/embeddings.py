@@ -4,7 +4,7 @@ from tqdm import tqdm
 
 from src.config_schema import AppConfig
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 if TYPE_CHECKING:
     from src.config_schema import AppConfig
@@ -78,7 +78,7 @@ def get_sentence_transformer_embeddings(texts, model_name, device):
     return model.encode(texts, show_progress_bar=True)
 
 
-def get_word2vec_embeddings(texts, w2v_params):
+def get_word2vec_embeddings(texts, w2v_params, cfg: Optional[AppConfig] = None):
     """Trains a Word2Vec model and generates sentence embeddings by averaging word vectors."""
     from gensim.models import Word2Vec
 
@@ -86,14 +86,29 @@ def get_word2vec_embeddings(texts, w2v_params):
     # Simple tokenization
     tokenized_sentences = [text.lower().split() for text in texts]
 
-    model = Word2Vec(
+    reproducibility = getattr(cfg, "reproducibility", None) if cfg is not None else None
+    deterministic = bool(getattr(reproducibility, "deterministic", False))
+    seed = None
+    if deterministic:
+        seed = getattr(reproducibility, "seed", None)
+        if seed is None and cfg is not None:
+            eval_cfg = getattr(cfg, "evaluation", None)
+            if eval_cfg is not None:
+                seed = getattr(eval_cfg, "random_state", None)
+
+    workers = getattr(w2v_params, "workers", 4)
+    word2vec_kwargs = dict(
         sentences=tokenized_sentences,
         vector_size=w2v_params.vector_size,
         window=w2v_params.window,
         min_count=w2v_params.min_count,
         sg=w2v_params.sg,
-        workers=4,
+        workers=1 if deterministic else workers,
     )
+    if deterministic and seed is not None:
+        word2vec_kwargs["seed"] = seed
+
+    model = Word2Vec(**word2vec_kwargs)
 
     wv = model.wv
     embedding_dim = model.vector_size
@@ -124,6 +139,6 @@ def get_embeddings(texts: list, cfg: AppConfig) -> np.ndarray:
             texts, emb_cfg.model_name, cfg.device
         )
     elif emb_cfg.type == "word2vec":
-        return get_word2vec_embeddings(texts, emb_cfg)
+        return get_word2vec_embeddings(texts, emb_cfg, cfg)
     else:
         raise ValueError(f"Unknown embedding type: {emb_cfg.type}")

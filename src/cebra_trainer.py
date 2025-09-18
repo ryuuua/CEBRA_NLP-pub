@@ -120,6 +120,12 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
     cfg.cebra.conditional = cfg.cebra.conditional.lower()
     loss_type = cfg.cebra.criterion.lower()
 
+    reproducibility = getattr(cfg, "reproducibility", None)
+    deterministic = bool(getattr(reproducibility, "deterministic", False))
+    seed_value = getattr(reproducibility, "seed", None)
+    if seed_value is None and getattr(cfg, "evaluation", None) is not None:
+        seed_value = getattr(cfg.evaluation, "random_state", None)
+
     if X_vectors is None:
         raise ValueError("Embeddings `X_vectors` must not be None")
     X_vectors = np.asarray(X_vectors)
@@ -153,13 +159,20 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
 
     loader = None
     sampler = None
+    data_generator = None
     if dist is None:
         dataset = TensorDataset(X_tensor)
-        sampler = DistributedSampler(
-            dataset, num_replicas=cfg.ddp.world_size, rank=cfg.ddp.rank
+        sampler_kwargs = dict(
+            dataset=dataset,
+            num_replicas=cfg.ddp.world_size,
+            rank=cfg.ddp.rank,
         )
-        loader = DataLoader(
-            dataset,
+        if deterministic and seed_value is not None:
+            sampler_kwargs["seed"] = seed_value
+        sampler = DistributedSampler(**sampler_kwargs)
+
+        loader_kwargs = dict(
+            dataset=dataset,
             batch_size=cfg.cebra.params.get("batch_size", 512),
             sampler=sampler,
             num_workers=cfg.cebra.num_workers,
@@ -168,6 +181,14 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
             persistent_workers=cfg.cebra.persistent_workers if cfg.cebra.num_workers > 0 else False,
             prefetch_factor=cfg.cebra.prefetch_factor if cfg.cebra.num_workers > 0 else None,
         )
+
+        if deterministic:
+            generator_device = "cuda" if str(cfg.device).startswith("cuda") else "cpu"
+            data_generator = torch.Generator(device=generator_device)
+            data_generator.manual_seed(int(seed_value) if seed_value is not None else 0)
+            loader_kwargs["generator"] = data_generator
+
+        loader = DataLoader(**loader_kwargs)
 
     model = _build_model(cfg, X_vectors.shape[1])
 
@@ -269,7 +290,11 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
         epoch = 0
         with tqdm(total=cfg.cebra.max_iterations, desc="CEBRA Training") as pbar:
             while steps < cfg.cebra.max_iterations:
-                sampler.set_epoch(epoch)
+                if sampler is not None:
+                    sampler.set_epoch(epoch)
+                if deterministic and data_generator is not None:
+                    base_seed = int(seed_value) if seed_value is not None else 0
+                    data_generator.manual_seed(base_seed + epoch)
                 for batch in loader:
                     (batch_x,) = batch
                     embeddings = model(batch_x.to(cfg.device, non_blocking=True))

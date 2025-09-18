@@ -20,6 +20,7 @@ from src.config_schema import (
     HyperParamTuningConfig,
     VisualizationConfig,
     DDPConfig,
+    ReproducibilityConfig,
 )
 
 def make_config() -> AppConfig:
@@ -45,6 +46,7 @@ def make_config() -> AppConfig:
         consistency_check=ConsistencyCheckConfig(enabled=True, num_runs=2),
         hpt=HyperParamTuningConfig(),
         ddp=DDPConfig(world_size=1, rank=0, local_rank=0),
+        reproducibility=ReproducibilityConfig(seed=0, deterministic=False),
         device="cpu",
     )
     return cfg

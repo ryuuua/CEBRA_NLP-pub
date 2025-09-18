@@ -151,3 +151,12 @@ python main.py \
 それらが `run_consistency_check` に渡されます。
 
 
+## 再現性設定
+
+`conf/config.yaml` には `reproducibility` セクションを追加しています。`seed` には
+Word2Vec や UMAP、CEBRA の DataLoader で共有される初期値が入り、
+`deterministic=true` を指定するとこれらの処理が単一スレッドで実行され、各
+エポックでシードが固定されます。既定値の `deterministic=false` のままでは従来
+通りランダム性を許容し、追加の同期処理を行いません。
+
+

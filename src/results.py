@@ -11,6 +11,7 @@ import seaborn as sns
 import umap
 from pathlib import Path
 from sklearn.decomposition import PCA
+from typing import Optional
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import (
     accuracy_score,
@@ -117,13 +118,27 @@ def save_static_2d_plots(
     title_prefix,
     output_dir: Path,
     hue_order: list,
+    cfg: Optional[AppConfig] = None,
 ):
     """Generates and saves 2D static plots using PCA and UMAP."""
     print("Generating static 2D scatter plots using PCA and UMAP...")
 
     pca_model = PCA(n_components=2)
-    # Use all available cores with n_jobs=-1 and omit random_state
-    umap_model = umap.UMAP(n_components=2, n_neighbors=15, min_dist=0.1, n_jobs=-1)
+    reproducibility = getattr(cfg, "reproducibility", None) if cfg is not None else None
+    deterministic = bool(getattr(reproducibility, "deterministic", False))
+    umap_seed = None
+    if deterministic:
+        umap_seed = getattr(reproducibility, "seed", None)
+        if umap_seed is None and cfg is not None:
+            eval_cfg = getattr(cfg, "evaluation", None)
+            if eval_cfg is not None:
+                umap_seed = getattr(eval_cfg, "random_state", None)
+
+    umap_kwargs = dict(n_components=2, n_neighbors=15, min_dist=0.1, n_jobs=1 if deterministic else -1)
+    if deterministic and umap_seed is not None:
+        umap_kwargs["random_state"] = umap_seed
+
+    umap_model = umap.UMAP(**umap_kwargs)
     X_pca = pca_model.fit_transform(embeddings)
     X_umap = umap_model.fit_transform(embeddings)
 

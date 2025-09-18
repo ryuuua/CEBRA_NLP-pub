@@ -19,6 +19,7 @@ from src.config_schema import (
     HyperParamTuningConfig,
     VisualizationConfig,
     DDPConfig,
+    ReproducibilityConfig,
 )
 from omegaconf import OmegaConf
 
@@ -45,6 +46,7 @@ def make_cfg(tmp_path, seed):
         consistency_check=ConsistencyCheckConfig(),
         hpt=HyperParamTuningConfig(),
         ddp=DDPConfig(world_size=1, rank=0, local_rank=0),
+        reproducibility=ReproducibilityConfig(seed=seed, deterministic=True),
         device="cpu",
     )
     return OmegaConf.structured(cfg)
