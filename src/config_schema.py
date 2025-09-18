@@ -74,11 +74,6 @@ class EvaluationConfig:
 
 
 @dataclass
-class ReproducibilityConfig:
-    seed: int = 42
-    deterministic: bool = False
-
-@dataclass
 class WandBConfig:
     project: str
     run_name: str
@@ -131,5 +126,5 @@ class AppConfig:
     consistency_check: ConsistencyCheckConfig
     hpt: HyperParamTuningConfig
     ddp: DDPConfig
-    reproducibility: ReproducibilityConfig = field(default_factory=ReproducibilityConfig)
+    reproducibility: ReproducibilityConfig 
     device: str = "cpu"
