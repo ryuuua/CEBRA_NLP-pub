@@ -265,6 +265,7 @@ def main(cfg: AppConfig) -> None:
                     labels=labels_list,
                     dataset_ids=cfg.consistency_check.dataset_ids,
                     enable_plots=cfg.evaluation.enable_plots,
+                    log_to_wandb=is_main_process,
                 )
             else:
                 run_consistency_check(
@@ -274,6 +275,7 @@ def main(cfg: AppConfig) -> None:
                     cfg,
                     output_dir,
                     enable_plots=cfg.evaluation.enable_plots,
+                    log_to_wandb=is_main_process,
                 )
     finally:
         if wandb.run is not None:

@@ -242,10 +242,14 @@ def run_consistency_check(
     dataset_ids=None,
     enable_plots: bool = True,
     step: int | None = None,
+    log_to_wandb: bool | None = None,
 ):
 
     print("\n--- Step 6: Running Consistency Check ---")
     check_cfg = cfg.consistency_check
+
+    if log_to_wandb is None:
+        log_to_wandb = wandb.run is not None
 
     # Between-datasets consistency
     if check_cfg.mode == "datasets":
@@ -261,7 +265,8 @@ def run_consistency_check(
         )
 
         mean_score = scores.mean()
-        wandb.log({"consistency_score_datasets": mean_score}, step=step)
+        if log_to_wandb:
+            wandb.log({"consistency_score_datasets": mean_score}, step=step)
         print(f"Mean consistency score (datasets): {mean_score:.4f}")
 
         if enable_plots:
@@ -269,7 +274,8 @@ def run_consistency_check(
             plot_path = output_dir / "consistency_plot_datasets.png"
             ax.figure.savefig(plot_path)
             plt.close(ax.figure)
-            wandb.save(str(plot_path))
+            if log_to_wandb:
+                wandb.save(str(plot_path))
 
         return mean_score, None
 
@@ -323,7 +329,8 @@ def run_consistency_check(
         )
 
         mean_score = scores.mean()
-        wandb.log({f"consistency_score_{name}": mean_score}, step=step)
+        if log_to_wandb:
+            wandb.log({f"consistency_score_{name}": mean_score}, step=step)
         print(f"Mean consistency score ({name}): {mean_score:.4f}")
         if name == "train":
             train_mean = mean_score
@@ -339,7 +346,8 @@ def run_consistency_check(
 
             # Figureを閉じる
             plt.close(ax.figure)
-            wandb.save(str(plot_path))
+            if log_to_wandb:
+                wandb.save(str(plot_path))
 
     if (
         embeddings_list is not None
@@ -355,7 +363,8 @@ def run_consistency_check(
         )
 
         dataset_mean = scores.mean()
-        wandb.log({"consistency_score_datasets": dataset_mean}, step=step)
+        if log_to_wandb:
+            wandb.log({"consistency_score_datasets": dataset_mean}, step=step)
         print(f"Mean consistency score (datasets): {dataset_mean:.4f}")
 
         if enable_plots:
@@ -364,7 +373,8 @@ def run_consistency_check(
 
             ax.figure.savefig(plot_path)
             plt.close(ax.figure)
-            wandb.save(str(plot_path))
+            if log_to_wandb:
+                wandb.save(str(plot_path))
 
     # Restore original persistent_workers setting
     cfg.cebra.persistent_workers = original_persistent
