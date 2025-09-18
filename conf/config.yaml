@@ -10,6 +10,11 @@ defaults:
 
 device: ${oc.env:DEVICE, cpu}
 
+reproducibility:
+  seed: 42
+  deterministic: false
+  cudnn_benchmark: false
+
 hydra:
   run:
 

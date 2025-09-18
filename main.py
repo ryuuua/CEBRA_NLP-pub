@@ -10,7 +10,12 @@ from src.config_schema import AppConfig, EmbeddingConfig
 from hydra.core.hydra_config import HydraConfig
 from hydra.utils import get_original_cwd
 from src.data import load_and_prepare_dataset
-from src.utils import get_embedding_cache_path, save_text_embedding, load_text_embedding
+from src.utils import (
+    apply_reproducibility,
+    get_embedding_cache_path,
+    load_text_embedding,
+    save_text_embedding,
+)
 from src.embeddings import get_embeddings
 from src.cebra_trainer import (
     train_cebra,
@@ -43,6 +48,7 @@ def main(cfg: AppConfig) -> None:
     cfg.ddp.world_size = int(os.environ.get("WORLD_SIZE", 1))
     cfg.ddp.rank = int(os.environ.get("RANK", 0))
     cfg.ddp.local_rank = local_rank
+    apply_reproducibility(cfg)
     is_main_process = cfg.ddp.rank == 0
     if cfg.ddp.world_size > 1:
         if "RANK" not in os.environ or "LOCAL_RANK" not in os.environ:

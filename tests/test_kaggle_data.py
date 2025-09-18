@@ -51,7 +51,9 @@ def make_kaggle_config() -> AppConfig:
         consistency_check=ConsistencyCheckConfig(enabled=False, num_runs=1),
         hpt=HyperParamTuningConfig(),
         ddp=DDPConfig(world_size=1, rank=0, local_rank=0),
+
         reproducibility=ReproducibilityConfig(seed=0, deterministic=False),
+
     )
     cfg.device = "cpu"
     return cfg
@@ -85,7 +87,9 @@ def make_kaggle_multilabel_config() -> AppConfig:
         consistency_check=ConsistencyCheckConfig(enabled=False, num_runs=1),
         hpt=HyperParamTuningConfig(),
         ddp=DDPConfig(world_size=1, rank=0, local_rank=0),
+
         reproducibility=ReproducibilityConfig(seed=0, deterministic=False),
+
     )
     cfg.device = "cpu"
     return cfg
