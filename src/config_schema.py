@@ -47,6 +47,7 @@ class EmbeddingConfig:
     window: int = 5
     min_count: int = 1
     sg: int = 0
+    workers: int = 4
 
 @dataclass
 class CEBRAConfig:
@@ -70,6 +71,12 @@ class EvaluationConfig:
     random_state: int
     knn_neighbors: int
     enable_plots: bool = True
+
+
+@dataclass
+class ReproducibilityConfig:
+    seed: int = 42
+    deterministic: bool = False
 
 @dataclass
 class WandBConfig:
@@ -124,5 +131,5 @@ class AppConfig:
     consistency_check: ConsistencyCheckConfig
     hpt: HyperParamTuningConfig
     ddp: DDPConfig
-    reproducibility: ReproducibilityConfig
+    reproducibility: ReproducibilityConfig = field(default_factory=ReproducibilityConfig)
     device: str = "cpu"

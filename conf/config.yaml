@@ -26,6 +26,10 @@ evaluation:
   knn_neighbors: 5
   enable_plots: false
 
+reproducibility:
+  seed: ${evaluation.random_state}
+  deterministic: false
+
 wandb:
   project: "CEBRA_NLP_Experiment-${dataset.name}"
   run_name: "default_run"
