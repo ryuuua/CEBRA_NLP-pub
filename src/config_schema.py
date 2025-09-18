@@ -83,6 +83,13 @@ class DDPConfig:
     rank: int
     local_rank: int
 
+
+@dataclass
+class ReproducibilityConfig:
+    seed: int
+    deterministic: bool = False
+    cudnn_benchmark: bool = False
+
 @dataclass
 class PathsConfig:
     embedding_cache_dir: str
@@ -117,4 +124,5 @@ class AppConfig:
     consistency_check: ConsistencyCheckConfig
     hpt: HyperParamTuningConfig
     ddp: DDPConfig
+    reproducibility: ReproducibilityConfig
     device: str = "cpu"

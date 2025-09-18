@@ -1,6 +1,14 @@
+import random
 from pathlib import Path
+from typing import TYPE_CHECKING
+
 import numpy as np
 from omegaconf import OmegaConf
+import torch
+import torch.distributed as dist
+
+if TYPE_CHECKING:
+    from src.config_schema import AppConfig
 
 def get_embedding_cache_path(cfg):
     """
@@ -53,3 +61,34 @@ def load_text_embedding(path: Path):
     else:
         print(f"No cached text embeddings found at {path}.")
         return None
+
+
+def apply_reproducibility(cfg: "AppConfig") -> None:
+    """Apply global seeding and deterministic settings based on the config."""
+
+    repro_cfg = getattr(cfg, "reproducibility", None)
+    if repro_cfg is None:
+        return
+
+    base_seed = int(repro_cfg.seed)
+
+    if dist.is_available() and dist.is_initialized():
+        seed_container = [base_seed]
+        dist.broadcast_object_list(seed_container, src=0)
+        base_seed = seed_container[0]
+        rank = dist.get_rank()
+    else:
+        rank = int(getattr(getattr(cfg, "ddp", None), "rank", 0) or 0)
+
+    seed = base_seed + rank
+
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+
+    torch.use_deterministic_algorithms(repro_cfg.deterministic)
+    if torch.backends.cudnn.is_available():
+        torch.backends.cudnn.deterministic = repro_cfg.deterministic
+        torch.backends.cudnn.benchmark = repro_cfg.cudnn_benchmark
