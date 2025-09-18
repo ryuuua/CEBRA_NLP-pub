@@ -17,6 +17,7 @@ from sklearn.metrics import (
     classification_report,
     ConfusionMatrixDisplay,
 )
+import os
 import tempfile
 import wandb
 from tqdm import tqdm
@@ -303,7 +304,12 @@ def run_consistency_check(
             model.fit(X_train)
         else:
             model.fit(X_train, y_train)
-        tmp_file = Path(tempfile.gettempdir(), f"cebra_consistency_{i}.pt")
+        with tempfile.NamedTemporaryFile(
+            delete=False,
+            suffix=".pt",
+            prefix=f"cebra_consistency_{os.getpid()}_{i}_",
+        ) as tmp:
+            tmp_file = Path(tmp.name)
         model.save(str(tmp_file))
         model_paths.append(tmp_file)
         del model
@@ -313,13 +319,17 @@ def run_consistency_check(
     train_embeddings = []
     valid_embeddings = []
     for tmp_file in tqdm(model_paths, desc="Transforming with saved models"):
-        loaded_model = cebra.CEBRA.load(str(tmp_file))
-        train_embeddings.append(loaded_model.transform(X_train))
-        valid_embeddings.append(loaded_model.transform(X_valid))
-        tmp_file.unlink()
-        del loaded_model
-        gc.collect()
-        clear_cuda_cache()
+        loaded_model = None
+        try:
+            loaded_model = cebra.CEBRA.load(str(tmp_file))
+            train_embeddings.append(loaded_model.transform(X_train))
+            valid_embeddings.append(loaded_model.transform(X_valid))
+        finally:
+            if loaded_model is not None:
+                del loaded_model
+            tmp_file.unlink(missing_ok=True)
+            gc.collect()
+            clear_cuda_cache()
 
     train_mean = valid_mean = None
     for name, embeddings in [("train", train_embeddings), ("valid", valid_embeddings)]:
