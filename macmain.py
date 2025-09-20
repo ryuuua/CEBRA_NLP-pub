@@ -17,9 +17,13 @@ from src.cebra_trainer import (
     normalize_model_architecture,
 )
 from sklearn.model_selection import train_test_split
-from src.results import (save_interactive_plot, #save_static_2d_plots,
-                         run_knn_classification, run_knn_regression,
-                         run_consistency_check)
+from src.results import (
+    save_interactive_plot,
+    save_static_2d_plots,
+    run_knn_classification,
+    run_knn_regression,
+    run_consistency_check,
+)
 from dotenv import load_dotenv
 import os
 
@@ -135,31 +139,50 @@ def main(cfg: AppConfig) -> None:
         # [DISCRETE CASE]
         print("Running discrete evaluation and visualization...")
         label_map = {int(k): v for k, v in cfg.dataset.label_map.items()}
+        if set(conditional_data) == {-1, 1}:
+            conditional_data = [0 if x == -1 else 1 for x in conditional_data]
         text_labels_full = [label_map[l] for l in conditional_data]
-        palette = OmegaConf.to_container(cfg.dataset.visualization.emotion_colors, resolve=True)
-        order = OmegaConf.to_container(cfg.dataset.visualization.emotion_order, resolve=True)
+        palette = OmegaConf.to_container(
+            cfg.dataset.visualization.emotion_colors, resolve=True
+        )
+        order = OmegaConf.to_container(
+            cfg.dataset.visualization.emotion_order, resolve=True
+        )
 
         # 可視化
-        interactive_path = output_dir / "cebra_interactive_discrete.html"
-        save_interactive_plot(
-            cebra_embeddings_full,
-            text_labels_full,
-            cfg.cebra.output_dim,
-            palette,
-            "Interactive CEBRA (Discrete)",
-            interactive_path,
-        )
-        if interactive_path.exists():
-            vis_artifact = wandb.Artifact(
-                name=interactive_path.stem, type="evaluation"
+        if cfg.evaluation.enable_plots:
+            interactive_path = output_dir / "cebra_interactive_discrete.html"
+            save_interactive_plot(
+                cebra_embeddings_full,
+                text_labels_full,
+                cfg.cebra.output_dim,
+                palette,
+                "Interactive CEBRA (Discrete)",
+                interactive_path,
             )
-            vis_artifact.add_file(str(interactive_path))
-            wandb.log_artifact(vis_artifact)
-        # save_static_2d_plots(cebra_embeddings_full, text_labels_full, palette, "CEBRA Embeddings (Discrete)", output_dir, order)
-        # static_artifact = wandb.Artifact("cebra-static-plots", type="evaluation")
-        # static_artifact.add_file(str(output_dir / "static_PCA_plot.png"))
-        # static_artifact.add_file(str(output_dir / "static_UMAP_plot.png"))
-        wandb.log_artifact(static_artifact)
+            if interactive_path.exists() and wandb.run is not None:
+                vis_artifact = wandb.Artifact(
+                    name=interactive_path.stem, type="evaluation"
+                )
+                vis_artifact.add_file(str(interactive_path))
+                wandb.log_artifact(vis_artifact)
+
+            save_static_2d_plots(
+                cebra_embeddings_full,
+                text_labels_full,
+                palette,
+                "CEBRA Embeddings (Discrete)",
+                output_dir,
+                order,
+            )
+            if wandb.run is not None:
+                static_artifact = wandb.Artifact(
+                    "cebra-static-plots", type="evaluation"
+                )
+                static_artifact.add_file(str(output_dir / "static_PCA_plot.png"))
+                static_artifact.add_file(str(output_dir / "static_UMAP_plot.png"))
+                wandb.log_artifact(static_artifact)
+
         # 評価
         accuracy, report = run_knn_classification(
             train_embeddings=cebra_train_embeddings, valid_embeddings=cebra_valid_embeddings,
