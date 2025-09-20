@@ -116,115 +116,11 @@ def main(cfg: AppConfig) -> None:
         seed = (
             cfg.dataset.shuffle_seed
             if getattr(cfg.dataset, "shuffle_seed", None) is not None
-            else (cfg.evaluation.random_state if hasattr(cfg, "evaluation") else None)
-
-    if cache is not None:
-        cached_ids, cached_embeddings, cached_seed = cache
-        if cached_seed == seed:
-            id_to_index = {str(i): idx for idx, i in enumerate(cached_ids)}
-            try:
-                X_vectors = np.stack(
-                    [cached_embeddings[id_to_index[str(i)]] for i in ids]
-                )
-            except KeyError:
-                X_vectors = get_embeddings(texts, cfg)
-                save_text_embedding(ids, X_vectors, seed, embedding_cache_path)
-        else:
-            print("Cached embeddings shuffle seed mismatch. Recomputing...")
-            X_vectors = get_embeddings(texts, cfg)
-            save_text_embedding(ids, X_vectors, seed, embedding_cache_path)
-    else:
-        X_vectors = get_embeddings(texts, cfg)
-        save_text_embedding(ids, X_vectors, seed, embedding_cache_path)
-
-    # --- Data Splitting ---
-    print("\n--- Step 3: Splitting data ---")
-    X_train, X_valid, conditional_train, conditional_valid, time_train, time_valid = train_test_split(
-        X_vectors, conditional_data, time_indices,
-        test_size=cfg.evaluation.test_size,
-        random_state=cfg.evaluation.random_state,
-        stratify=(conditional_data if cfg.cebra.conditional == 'discrete' else None)
-    )
-
-    # --- 4. Train CEBRA ---
-    print("\n--- Step 4: Training CEBRA model ---")
-
-    labels_for_training = (
-        None if cfg.cebra.conditional == "None" else conditional_train
-    )
-    cebra_model = train_cebra(X_train, labels_for_training, cfg, output_dir)
-    model_path = save_cebra_model(cebra_model, output_dir)
-
-    model_artifact = wandb.Artifact(name=model_path.stem, type="model")
-    model_artifact.add_file(str(model_path))
-    wandb.log_artifact(model_artifact)
-
-
-    # --- 5. Transform Data ---
-    print("\n--- Step 5: Transforming data with trained CEBRA model ---")
-    cebra_embeddings_full = transform_cebra(cebra_model, X_vectors, cfg.device)
-    cebra_train_embeddings = transform_cebra(cebra_model, X_train, cfg.device)
-    cebra_valid_embeddings = transform_cebra(cebra_model, X_valid, cfg.device)
-
-    # --- 6. Visualization & Evaluation ---
-    print("\n--- Step 6: Visualization and Evaluation ---")
-    
-    # ★★★ ここからが具体的な分岐ロジック ★★★
-    if cfg.cebra.conditional == 'discrete':
-        # [DISCRETE CASE]
-        print("Running discrete evaluation and visualization...")
-        label_map = {int(k): v for k, v in cfg.dataset.label_map.items()}
-        if set(conditional_data) == {-1, 1}:
-            conditional_data = [0 if x == -1 else 1 for x in conditional_data]
-        text_labels_full = [label_map[l] for l in conditional_data]
-        palette = OmegaConf.to_container(
-            cfg.dataset.visualization.emotion_colors, resolve=True
-        )
-        order = OmegaConf.to_container(
-            cfg.dataset.visualization.emotion_order, resolve=True
-        )
-
-        # 可視化
-        if cfg.evaluation.enable_plots:
-            interactive_path = output_dir / "cebra_interactive_discrete.html"
-            save_interactive_plot(
-                cebra_embeddings_full,
-                text_labels_full,
-                cfg.cebra.output_dim,
-                palette,
-                "Interactive CEBRA (Discrete)",
-                interactive_path,
+            else (
+                cfg.evaluation.random_state if hasattr(cfg, "evaluation") else None
             )
-            if interactive_path.exists() and wandb.run is not None:
-                vis_artifact = wandb.Artifact(
-                    name=interactive_path.stem, type="evaluation"
-                )
-                vis_artifact.add_file(str(interactive_path))
-                wandb.log_artifact(vis_artifact)
-
-            save_static_2d_plots(
-                cebra_embeddings_full,
-                text_labels_full,
-                palette,
-                "CEBRA Embeddings (Discrete)",
-                output_dir,
-                order,
-            )
-            if wandb.run is not None:
-                static_artifact = wandb.Artifact(
-                    "cebra-static-plots", type="evaluation"
-                )
-                static_artifact.add_file(str(output_dir / "static_PCA_plot.png"))
-                static_artifact.add_file(str(output_dir / "static_UMAP_plot.png"))
-                wandb.log_artifact(static_artifact)
-
-        # 評価
-        accuracy, report = run_knn_classification(
-            train_embeddings=cebra_train_embeddings, valid_embeddings=cebra_valid_embeddings,
-            y_train=conditional_train, y_valid=conditional_valid,
-            label_map=label_map, output_dir=output_dir, knn_neighbors=cfg.evaluation.knn_neighbors
-
         )
+
         if cache is not None:
             cached_ids, cached_embeddings, cached_seed = cache
             if cached_seed == seed:
@@ -244,8 +140,16 @@ def main(cfg: AppConfig) -> None:
             X_vectors = get_embeddings(texts, cfg)
             save_text_embedding(ids, X_vectors, seed, embedding_cache_path)
 
+        # --- Data Splitting ---
         print("\n--- Step 3: Splitting data ---")
-        X_train, X_valid, conditional_train, conditional_valid, time_train, time_valid = train_test_split(
+        (
+            X_train,
+            X_valid,
+            conditional_train,
+            conditional_valid,
+            time_train,
+            time_valid,
+        ) = train_test_split(
             X_vectors,
             conditional_data,
             time_indices,
@@ -254,18 +158,20 @@ def main(cfg: AppConfig) -> None:
             stratify=(conditional_data if cfg.cebra.conditional == "discrete" else None),
         )
 
+        # --- 4. Train CEBRA ---
         print("\n--- Step 4: Training CEBRA model ---")
+
         labels_for_training = (
             None if cfg.cebra.conditional == "none" else conditional_train
         )
         cebra_model = train_cebra(X_train, labels_for_training, cfg, output_dir)
         model_path = save_cebra_model(cebra_model, output_dir)
 
-        if run is not None:
-            model_artifact = wandb.Artifact(name=model_path.stem, type="model")
-            model_artifact.add_file(str(model_path))
-            wandb.log_artifact(model_artifact)
+        model_artifact = wandb.Artifact(name=model_path.stem, type="model")
+        model_artifact.add_file(str(model_path))
+        wandb.log_artifact(model_artifact)
 
+        # --- 5. Transform Data ---
         print("\n--- Step 5: Transforming data with trained CEBRA model ---")
         cebra_embeddings_full = transform_cebra(cebra_model, X_vectors, cfg.device)
         if cfg.cebra.save_embeddings:
@@ -274,15 +180,17 @@ def main(cfg: AppConfig) -> None:
                 emb_artifact = wandb.Artifact(name=emb_path.stem, type="embeddings")
                 emb_artifact.add_file(str(emb_path))
                 wandb.log_artifact(emb_artifact)
-
         cebra_train_embeddings = transform_cebra(cebra_model, X_train, cfg.device)
         cebra_valid_embeddings = transform_cebra(cebra_model, X_valid, cfg.device)
 
+        # --- 6. Visualization & Evaluation ---
         print("\n--- Step 6: Visualization and Evaluation ---")
+
+        # ★★★ ここからが具体的な分岐ロジック ★★★
         if cfg.cebra.conditional == "discrete":
+            # [DISCRETE CASE]
             print("Running discrete evaluation and visualization...")
             label_map = {int(k): v for k, v in cfg.dataset.label_map.items()}
-            labels = np.asarray(conditional_data, dtype=int)
             if set(conditional_data) == {-1, 1}:
                 conditional_data = [0 if x == -1 else 1 for x in conditional_data]
             text_labels_full = [label_map[l] for l in conditional_data]
@@ -293,6 +201,7 @@ def main(cfg: AppConfig) -> None:
                 cfg.dataset.visualization.emotion_order, resolve=True
             )
 
+            # 可視化
             if cfg.evaluation.enable_plots:
                 interactive_path = output_dir / "cebra_interactive_discrete.html"
                 save_interactive_plot(
@@ -309,6 +218,7 @@ def main(cfg: AppConfig) -> None:
                     )
                     vis_artifact.add_file(str(interactive_path))
                     wandb.log_artifact(vis_artifact)
+
                 save_static_2d_plots(
                     cebra_embeddings_full,
                     text_labels_full,
@@ -325,6 +235,7 @@ def main(cfg: AppConfig) -> None:
                     static_artifact.add_file(str(output_dir / "static_UMAP_plot.png"))
                     wandb.log_artifact(static_artifact)
 
+            # 評価
             accuracy, report = run_knn_classification(
                 train_embeddings=cebra_train_embeddings,
                 valid_embeddings=cebra_valid_embeddings,
