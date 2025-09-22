@@ -140,6 +140,11 @@ def save_static_2d_plots(
 
     umap_model = umap.UMAP(**umap_kwargs)
     X_pca = pca_model.fit_transform(embeddings)
+    variance_ratios = pca_model.explained_variance_ratio_
+    print(
+        "PCA explained variance ratios:",
+        ", ".join(f"{ratio * 100:.2f}%" for ratio in variance_ratios),
+    )
     X_umap = umap_model.fit_transform(embeddings)
 
     for X_reduced, name in [(X_pca, "PCA"), (X_umap, "UMAP")]:
@@ -153,8 +158,12 @@ def save_static_2d_plots(
             hue_order=hue_order,
         )
         plt.title(f"{title_prefix} with {name}")
-        plt.xlabel(f"{name} 1")
-        plt.ylabel(f"{name} 2")
+        if name == "PCA":
+            plt.xlabel(f"{name} 1 ({variance_ratios[0] * 100:.1f}%)")
+            plt.ylabel(f"{name} 2 ({variance_ratios[1] * 100:.1f}%)")
+        else:
+            plt.xlabel(f"{name} 1")
+            plt.ylabel(f"{name} 2")
         plt.legend(title="Label", bbox_to_anchor=(1.05, 1), loc="upper left")
         plt.tight_layout()
         static_plot_file = output_dir / f"static_{name}_plot.png"
