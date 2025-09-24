@@ -1,3 +1,31 @@
+# --- デフォルト: すべて無視 ---
+/*
+
+# --- 例外（追跡したいものだけ許可）---
+!.gitignore
+!README.md
+!LICENSE
+!requirements.txt
+!pyproject.toml
+!setup.cfg
+!setup.py
+
+# コード・設定・スクリプト・テストを許可
+!src/
+!conf/
+!scripts/
+!tests/
+
+# 許可したディレクトリ配下の中身も許可（重要）
+!src/**
+!conf/**/*.yaml
+!conf/**/*.yml
+!scripts/**
+!tests/**
+
+# --- 追加で残したいものがあれば明示 ---
+!Makefile
+!.env.example
 
 
 # --- よくある生成物・重いものは引き続き無視（安全のため明記）---
