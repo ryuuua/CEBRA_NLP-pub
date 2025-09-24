@@ -1,162 +1,51 @@
 # CEBRA_NLP
 
-このプロジェクトでは CEBRA を用いた NLP 実験を行います。
+This project aims to use CEBRA to construct latent space with identifiability in a text embedding model's representation.
 
-## 実行方法
+## Setting
+dateset=dair-ai,go_emotions,ag_news,imdb,
+embedding=bert,roberta,sentence_bert,embeddinggemma,granite_embedding,jina_embedding,qwen3_embedding
 
-単一 GPU での実行:
+cebra 
+cebra=
+cebra.output_dim=
+cebra
+### Defalut setting
+'''
+defaults:
+  - paths: default
+  - dataset: dair-ai
+  - embedding: bert
+  - cebra: offset1-model-lr
+  - consistency_check: default
+  - hpt: my_sweep
+  - _self_
 
-```bash
-python main.py
-```
+device: ${oc.env:DEVICE, cpu}
 
-### 埋め込みモデルのプリセット
+reproducibility:
+  seed: 7
+  deterministic: false
+  cudnn_benchmark: false
 
-`conf/embedding/` には Hugging Face 上の埋め込みモデルを参照するプリセットが追加されています。CLI からは `embedding=<プリセット名>` を指定して切り替えます (例: `python main.py embedding=embeddinggemma`)。
+hydra:
+  run:
 
-- `embeddinggemma`: `google/embeddinggemma-300M` を利用する 1024 次元のモデル。Matryoshka 表現学習に対応しているため、必要に応じて埋め込みベクトルを 512 次元や 256 次元にトリミングして高速化できます。
-- `qwen3_embedding`: `Qwen/Qwen3-1.5B-Text-Embedding` を利用する 1536 次元モデル。1.5B パラメータ規模のため、GPU (少なくとも 16GB メモリを推奨) での推論が現実的です。
-- `granite_embedding`: `ibm-granite/granite-embedding-english-r2` を利用する 768 次元モデル。IBM Granite の英語向け最新リリースで、CPU でも比較的扱いやすいサイズです。
-- `jina_embedding`: `jinaai/jina-embeddings-v2-base-en` を利用する 1024 次元モデル。英語検索・要約用途向けの Sentence-Transformers 互換モデルです。
+    dir: results/${dataset.name}/${now:%Y-%m-%d_%H-%M-%S}
 
-`embedding.name` や `model_name` の値には Hugging Face のリポジトリ ID がそのまま入るため、キャッシュファイル名は自動的にスラッシュをエスケープした形 (`google__embeddinggemma-300M` など) になります。
+evaluation:
+  test_size: 0.2
+  random_state: 42
+  knn_neighbors: 5
+  enable_plots: false
 
-Mac (CUDA/MPS/CPU) での実行 (自動デバイス検出):
+wandb:
+  project: "CEBRA_NLP_Experiment-${dataset.name}"
+  run_name: "default_run"
+  entity: null
 
-```bash
-python macmain.py
-# or
-python macmainoptimize.py
-```
-
-分散学習 (2 GPU) での実行例:
-
-```bash
-torchrun --nproc_per_node=2 main.py
-```
-
-ハイパーパラメータスイープの実行例:
-
-```bash
-python main.py -m hpt=my_sweep
-```
-
-
-### TREC データセットでの実行
-
-質問分類タスク [TREC](https://huggingface.co/datasets/trec) を利用する場合は、以下のようにデータセットを切り替えます:
-
-```bash
-python main.py dataset=trec
-```
-
-### Kaggle データセットを使用する
-
-Kaggle のデータセットを利用する場合は、`dataset.kaggle_handle` に
-対象データセットのハンドルを指定します。`kagglehub` によりデータセットは
-自動的にダウンロードされます:
-
-```bash
-python main.py dataset=hierarchical_text_classification dataset.kaggle_handle=kashnitsky/hierarchical-text-classification
-```
-
-デフォルトでは `kagglehub` のキャッシュディレクトリに保存されます。保存場所を
-変更したい場合は `paths.kaggle_data_dir` を設定してください:
-
-```bash
-python main.py dataset=hierarchical_text_classification dataset.kaggle_handle=kashnitsky/hierarchical-text-classification paths.kaggle_data_dir=/path/to/data
-```
-
-オフライン環境や独自のディレクトリを使用する場合のみ、データセットを
-`paths.kaggle_data_dir` に手動で配置する必要があります。
-
-任意の Kaggle データセットを自動ダウンロードして使用する場合は、`dataset.kaggle_handle` に Kaggle のハンドル (`<user>/<dataset>`) を指定します。`dataset.source=kaggle` とあわせて、必要に応じてテキスト列やラベル列を設定してください。
-
-```bash
-python main.py dataset=my_kaggle_run \
-    dataset.source=kaggle \
-    dataset.kaggle_handle=user/dataset_name \
-    dataset.text_column=text \
-    dataset.label_column=label
-```
-
-### マルチラベル分類
-
-複数のラベル列を持つデータセットでは、`multi_label` フラグを有効にし、`label_columns` に対象の列を指定することでマルチラベル分類に対応できます。
-
-```bash
-python main.py dataset=my_dataset \
-    dataset.multi_label=true \
-    dataset.label_columns='["label_a", "label_b"]'
-```
-
-### MSE Loss Targets
-
-MSE 損失を使用する場合、ラベルは `cebra.output_dim` と同じ次元を持つ
-ベクトルである必要があります。整数ラベルを与えた場合は自動的に
-ワンホットベクトルに変換されます。ラベルの最大値からクラス数を自動
-推定し (`num_classes = int(labels.max()) + 1`)、`cebra.output_dim` が一致
-しない場合は警告とともにこの値に更新されます。
-
-## Experiment Tracking
-
-This project uses [Weights & Biases](https://wandb.ai/) for experiment tracking.
-Configure your project, run name, and optional entity in `conf/config.yaml`
-under the `wandb` section. Runs are initialized automatically by the
-training scripts and metrics, parameters, and artifacts are logged to W&B.
-
-複数ランを同じグループにまとめるには `group` 引数を設定します:
-
-```python
-from hydra.core.hydra_config import HydraConfig
-run = wandb.init(
-    project=cfg.wandb.project,
-    entity=cfg.wandb.entity,
-    name=HydraConfig.get().job.name,
-    group=HydraConfig.get().job.name,
-    config=OmegaConf.to_container(cfg, resolve=True),
-)
-```
-
-実験結果のファイルを W&B の Artifact として保存する例:
-
-
-
-## Conditional Modes
-
-`cebra.conditional` はラベルの条件付け方法を指定します。利用可能なモードは以下のとおりです。
-
-- `none`: 条件付けなし
-- `discrete`: 離散ラベルを使用
-- `custom`: 任意の条件データを使用
-
-## Consistency Check Modes
-
-`consistency_check.mode` では一貫性評価の方法を選択できます。
-
-- `runs` (デフォルト): 同じ設定で複数回モデルを学習し，ラン間の一貫性を計算します。
-- `datasets`: 複数の言語モデルで得た埋め込みを比較し，データセット間の一貫性を計算します。
-
-`datasets` モードを使用する場合は，`consistency_check.dataset_ids` に使用する埋め込み
-モデルの識別子をリストで指定してください。識別子は `conf/embedding/` 内の YAML
-ファイル名と一致させます。例:
-
-```bash
-python main.py \
-    consistency_check.mode=datasets \
-    consistency_check.dataset_ids='[bert,roberta]'
-```
-
-各モデルに対して同じラベル (`conditional_data`) と ID を用いて埋め込みが生成され，
-それらが `run_consistency_check` に渡されます。
-
-
-## 再現性設定
-
-`conf/config.yaml` には `reproducibility` セクションを追加しています。`seed` には
-Word2Vec や UMAP、CEBRA の DataLoader で共有される初期値が入り、
-`deterministic=true` を指定するとこれらの処理が単一スレッドで実行され、各
-エポックでシードが固定されます。既定値の `deterministic=false` のままでは従来
-通りランダム性を許容し、追加の同期処理を行いません。
-
-
+ddp:
+  world_size: 2
+  rank: 0
+  local_rank: 0
+'''
