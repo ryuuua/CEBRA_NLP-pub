@@ -119,6 +119,7 @@ def save_static_2d_plots(
     output_dir: Path,
     hue_order: list,
     cfg: Optional[AppConfig] = None,
+    log_to_wandb: Optional[bool] = None,
 ):
     """Generates and saves 2D static plots using PCA and UMAP."""
     print("Generating static 2D scatter plots using PCA and UMAP...")
@@ -145,6 +146,17 @@ def save_static_2d_plots(
         "PCA explained variance ratios:",
         ", ".join(f"{ratio * 100:.2f}%" for ratio in variance_ratios),
     )
+
+    if log_to_wandb is None:
+        log_to_wandb = wandb.run is not None
+
+    if log_to_wandb:
+        wandb.log(
+            {
+                f"pca_variance_ratio_dim{i + 1}": float(ratio)
+                for i, ratio in enumerate(variance_ratios)
+            }
+        )
     X_umap = umap_model.fit_transform(embeddings)
 
     for X_reduced, name in [(X_pca, "PCA"), (X_umap, "UMAP")]:
