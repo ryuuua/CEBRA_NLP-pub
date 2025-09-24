@@ -7,7 +7,11 @@ from pathlib import Path
 
 sys.path.append(str(Path(__file__).resolve().parents[1]))
 
-from src.results import run_consistency_check, run_knn_classification
+from src.results import (
+    run_consistency_check,
+    run_knn_classification,
+    save_static_2d_plots,
+)
 from src.config_schema import (
     AppConfig,
     PathsConfig,
@@ -153,4 +157,26 @@ def test_knn_classification_skips_plots(tmp_path):
     )
 
     assert not (tmp_path / "confusion_matrix.png").exists()
+
+
+def test_save_static_2d_plots_logs_variance_ratios(tmp_path):
+    os.environ["WANDB_MODE"] = "offline"
+
+    embeddings = np.random.rand(20, 5)
+    text_labels = ["label"] * embeddings.shape[0]
+    palette = {"label": "#000000"}
+
+    with wandb.init(project="test-exp", dir=str(tmp_path)) as run:
+        save_static_2d_plots(
+            embeddings=embeddings,
+            text_labels=text_labels,
+            palette=palette,
+            title_prefix="Test",
+            output_dir=tmp_path,
+            hue_order=["label"],
+        )
+        summary = dict(run.summary)
+
+    assert "pca_variance_ratio_dim1" in summary
+    assert "pca_variance_ratio_dim2" in summary
 
