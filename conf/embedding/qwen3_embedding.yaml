@@ -1,0 +1,5 @@
+# @package embedding
+name: Qwen/Qwen3-1.5B-Text-Embedding
+type: hf_transformer
+model_name: 'Qwen/Qwen3-1.5B-Text-Embedding'
+output_dim: 1536

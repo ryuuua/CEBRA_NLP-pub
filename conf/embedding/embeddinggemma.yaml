@@ -1,0 +1,5 @@
+# @package embedding
+name: google/embeddinggemma-300M
+type: hf_transformer
+model_name: 'google/embeddinggemma-300M'
+output_dim: 1024

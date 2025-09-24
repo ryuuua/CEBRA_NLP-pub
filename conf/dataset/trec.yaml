@@ -1,0 +1,14 @@
+# @package dataset
+
+name: trec
+source: hf
+hf_path: "trec"
+text_column: "text"
+label_column: "label-coarse"
+label_map:
+  0: "ABBR"
+  1: "DESC"
+  2: "ENTY"
+  3: "HUM"
+  4: "LOC"
+  5: "NUM"

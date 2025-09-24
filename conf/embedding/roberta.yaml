@@ -1,0 +1,5 @@
+# @package embedding
+name: roberta-base
+type: hf_transformer
+model_name: 'roberta-base'
+output_dim: 768

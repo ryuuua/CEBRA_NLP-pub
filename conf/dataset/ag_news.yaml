@@ -1,0 +1,23 @@
+# @package dataset
+
+name: ag_news
+source: hf
+splits: ["train", "test"]
+hf_path: "fancyzhx/ag_news"
+text_column: "text"
+label_column: "label"
+shuffle: false
+
+label_map:
+  0: "World"
+  1: "Sports"
+  2: "Business"
+  3: "Sci/Tech"
+
+visualization:
+  emotion_order: ['World', 'Sports', 'Business', 'Sci/Tech']
+  emotion_colors:
+    World: '#1f77b4'
+    Sports: '#ff7f0e'
+    Business: '#2ca02c'
+    Sci/Tech: '#d62728'

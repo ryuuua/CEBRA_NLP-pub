@@ -1,0 +1,5 @@
+# @package embedding
+name: ibm-granite/granite-embedding-english-r2
+type: hf_transformer
+model_name: 'ibm-granite/granite-embedding-english-r2'
+output_dim: 768

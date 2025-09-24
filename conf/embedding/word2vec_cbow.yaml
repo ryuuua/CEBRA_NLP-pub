@@ -1,0 +1,8 @@
+# @package embedding
+name: word2vec-cbow
+type: word2vec
+# Parameters for training
+vector_size: 300 # This will be the output_dim
+window: 5
+min_count: 2
+sg: 0 # 0 for CBOW, 1 for Skip-gram

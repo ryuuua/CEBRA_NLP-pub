@@ -1,0 +1,5 @@
+# @package embedding
+name: bert-base-uncased
+type: hf_transformer # Type identifier for the script
+model_name: 'bert-base-uncased'
+output_dim: 768

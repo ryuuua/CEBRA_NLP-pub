@@ -1,0 +1,5 @@
+# @package embedding
+name: jinaai/jina-embeddings-v2-base-en
+type: hf_transformer
+model_name: 'jinaai/jina-embeddings-v2-base-en'
+output_dim: 1024
