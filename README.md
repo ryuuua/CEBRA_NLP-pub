@@ -6,24 +6,21 @@ This project aims to use CEBRA to construct latent space with identifiability in
 dateset=dair-ai,go_emotions,ag_news,imdb,
 embedding=bert,roberta,sentence_bert,embeddinggemma,granite_embedding,jina_embedding,qwen3_embedding
 
-cebra 
-cebra=
-cebra.output_dim=
-cebra
+
 ### Defalut setting
-'''
+```
 defaults:
   - paths: default
-  - dataset: dair-ai
-  - embedding: bert
-  - cebra: offset1-model-lr
-  - consistency_check: default
+  - dataset: dair-ai                  # dataset
+  - embedding: bert                   # language embedding model
+  - cebra: offset1-model-lr           # Cebra model 
+  - consistency_check: default        #consistecy check default: consistecy check enabeled, check between 5runs
   - hpt: my_sweep
   - _self_
 
 device: ${oc.env:DEVICE, cpu}
 
-reproducibility:
+reproducibility:         
   seed: 7
   deterministic: false
   cudnn_benchmark: false
@@ -37,15 +34,5 @@ evaluation:
   test_size: 0.2
   random_state: 42
   knn_neighbors: 5
-  enable_plots: false
-
-wandb:
-  project: "CEBRA_NLP_Experiment-${dataset.name}"
-  run_name: "default_run"
-  entity: null
-
-ddp:
-  world_size: 2
-  rank: 0
-  local_rank: 0
-'''
+  enable_plots: false                 # defaults setting do not provide any visualization
+```
