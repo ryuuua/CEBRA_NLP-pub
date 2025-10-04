@@ -28,6 +28,7 @@ class DatasetConfig:
     kaggle_handle: Optional[str] = None
 
     hf_path: Optional[str] = None
+    trust_remote_code: bool = False
     kaggle_handle: Optional[str] = None
     source: str = "hf"
     data_files: Optional[str] = None

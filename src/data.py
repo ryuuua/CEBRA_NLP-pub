@@ -1,15 +1,59 @@
 import os
+import urllib.request
 import pandas as pd
 import numpy as np
 from datasets import load_dataset
 import kagglehub
 from src.config_schema import AppConfig
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, List
 
 
 if TYPE_CHECKING:
     from src.config_schema import AppConfig
+
+
+_TREC_URLS = {
+    "train": "https://cogcomp.seas.upenn.edu/Data/QA/QC/train_5500.label",
+    "test": "https://cogcomp.seas.upenn.edu/Data/QA/QC/TREC_10.label",
+}
+
+
+def _should_use_trec_fallback(error: Exception) -> bool:
+    message = str(error)
+    return "Dataset scripts are no longer supported" in message or "trust_remote_code" in message
+
+
+def _download_trec_split(split: str, dataset_cfg) -> pd.DataFrame:
+    if split not in _TREC_URLS:
+        raise ValueError(f"Unsupported split '{split}' for TREC dataset.")
+    url = _TREC_URLS[split]
+    with urllib.request.urlopen(url) as response:
+        rows = response.read().splitlines()
+
+    label_column = dataset_cfg.label_column or "label"
+    text_column = dataset_cfg.text_column
+    label_to_id = {label: idx for idx, label in dataset_cfg.label_map.items()}
+
+    records = []
+    for row in rows:
+        fine_label, _, text = row.replace(b"\xf0", b" ").strip().decode("utf-8").partition(" ")
+        coarse_label = fine_label.split(":")[0]
+        if coarse_label not in label_to_id:
+            raise ValueError(f"Unknown coarse label '{coarse_label}' in TREC data.")
+        records.append({text_column: text, label_column: label_to_id[coarse_label]})
+
+    return pd.DataFrame.from_records(records)
+
+
+def _load_trec_from_source(dataset_cfg, splits: List[str]) -> List[pd.DataFrame]:
+    requested_splits = splits or list(_TREC_URLS.keys())
+    frames: List[pd.DataFrame] = []
+    for split in requested_splits:
+        if split not in _TREC_URLS:
+            raise ValueError(f"Unsupported split '{split}' for TREC dataset.")
+        frames.append(_download_trec_split(split, dataset_cfg))
+    return frames
 
 
 def load_and_prepare_dataset(cfg: "AppConfig"):
@@ -19,11 +63,32 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
     print(f"Loading dataset: {dataset_cfg.name}")
 
     if dataset_cfg.source == "hf":
-        if dataset_cfg.splits:
-            datasets = [load_dataset(dataset_cfg.hf_path, split=split) for split in dataset_cfg.splits]
-        else:
-            dataset = load_dataset(dataset_cfg.hf_path)
-            datasets = [dataset[split] for split in dataset.keys()]
+        load_kwargs = {}
+        if getattr(dataset_cfg, "trust_remote_code", False):
+            load_kwargs["trust_remote_code"] = True
+
+        try:
+            if dataset_cfg.splits:
+                datasets = [
+                    load_dataset(
+                        dataset_cfg.hf_path,
+                        split=split,
+                        **load_kwargs,
+                    )
+                    for split in dataset_cfg.splits
+                ]
+            else:
+                dataset = load_dataset(
+                    dataset_cfg.hf_path,
+                    **load_kwargs,
+                )
+                datasets = [dataset[split] for split in dataset.keys()]
+        except (RuntimeError, ValueError) as err:
+            if dataset_cfg.hf_path == "trec" and _should_use_trec_fallback(err):
+                print("Falling back to manual download for the TREC dataset.")
+                datasets = _load_trec_from_source(dataset_cfg, dataset_cfg.splits)
+            else:
+                raise
         all_splits = [pd.DataFrame(d) for d in datasets]
         df = pd.concat(all_splits, ignore_index=True)
     elif dataset_cfg.source == "csv":
@@ -51,6 +116,14 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
             csv_path = os.path.join(path, csv_files[0])
 
         df = pd.read_csv(csv_path)
+    elif dataset_cfg.source == "sklearn":
+        if dataset_cfg.sklearn_dataset == "20newsgroups":
+            datasets = _load_20newsgroups_from_source(dataset_cfg, dataset_cfg.splits)
+            df = pd.concat(datasets, ignore_index=True)
+        else:
+            raise ValueError(
+                f"Unsupported sklearn_dataset: {dataset_cfg.sklearn_dataset}."
+            )
     else:
         raise ValueError(
             f"Unsupported dataset source: {dataset_cfg.source}. Supported sources are 'hf', 'csv', and 'kaggle'."

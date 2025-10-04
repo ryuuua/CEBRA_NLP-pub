@@ -3,6 +3,7 @@
 name: trec
 source: hf
 hf_path: "trec"
+trust_remote_code: true
 text_column: "text"
 label_column: "label-coarse"
 label_map:
