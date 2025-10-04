@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 from datasets import load_dataset
 import kagglehub
+from sklearn.datasets import fetch_20newsgroups
 from src.config_schema import AppConfig
 
 from typing import TYPE_CHECKING, List
@@ -53,6 +54,41 @@ def _load_trec_from_source(dataset_cfg, splits: List[str]) -> List[pd.DataFrame]
         if split not in _TREC_URLS:
             raise ValueError(f"Unsupported split '{split}' for TREC dataset.")
         frames.append(_download_trec_split(split, dataset_cfg))
+    return frames
+
+
+def _load_20newsgroups_from_source(dataset_cfg, splits: List[str]) -> List[pd.DataFrame]:
+    supported_splits = {"train", "test", "all"}
+    requested_splits = splits or ["train", "test"]
+    frames: List[pd.DataFrame] = []
+    text_column = dataset_cfg.text_column
+    label_column = dataset_cfg.label_column or "label"
+    expected_label_order = [
+        dataset_cfg.label_map[i] for i in sorted(dataset_cfg.label_map.keys())
+    ] if dataset_cfg.label_map else None
+
+    for split in requested_splits:
+        if split not in supported_splits:
+            raise ValueError(
+                f"Unsupported split '{split}' for 20 Newsgroups dataset."
+            )
+
+        subset = split
+        data = fetch_20newsgroups(subset=subset, shuffle=False)
+
+        if expected_label_order is not None:
+            target_names = list(data.target_names)
+            if target_names != expected_label_order:
+                raise ValueError(
+                    "Configured label_map does not match 20 Newsgroups target names."
+                )
+
+        frame = pd.DataFrame({
+            text_column: pd.Series(data.data, dtype=str),
+            label_column: data.target,
+        })
+        frames.append(frame)
+
     return frames
 
 
@@ -126,7 +162,8 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
             )
     else:
         raise ValueError(
-            f"Unsupported dataset source: {dataset_cfg.source}. Supported sources are 'hf', 'csv', and 'kaggle'."
+            "Unsupported dataset source: "
+            f"{dataset_cfg.source}. Supported sources are 'hf', 'csv', 'kaggle', and 'sklearn'."
         )
 
     # Special handling for go_emotions: use only the first label

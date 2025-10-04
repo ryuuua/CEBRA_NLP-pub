@@ -30,6 +30,7 @@ class DatasetConfig:
     hf_path: Optional[str] = None
     trust_remote_code: bool = False
     kaggle_handle: Optional[str] = None
+    sklearn_dataset: Optional[str] = None
     source: str = "hf"
     data_files: Optional[str] = None
     splits: List[str] = field(default_factory=list)
