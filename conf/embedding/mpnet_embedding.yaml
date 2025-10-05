@@ -1,0 +1,5 @@
+# @package embedding
+name: sentence-transformers/all-mpnet-base-v2
+type: sentence_transformer
+model_name: 'sentence-transformers/all-mpnet-base-v2'
+output_dim: 768

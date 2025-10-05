@@ -6,7 +6,7 @@ model_architecture: offset1-model-v4
 
 # CEBRA-specific parameters
 output_dim: 2
-max_iterations: 15000
+max_iterations: 20000
 conditional: 'discrete'
 criterion: learnablecosine
 num_workers: 2

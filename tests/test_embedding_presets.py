@@ -8,9 +8,10 @@ from omegaconf import OmegaConf
     "config_name, expected_model, expected_dim",
     [
         ("embeddinggemma", "google/embeddinggemma-300M", 1024),
-        ("qwen3_embedding", "Qwen/Qwen3-1.5B-Text-Embedding", 1536),
+        ("qwen3_embedding", "Qwen/Qwen3-Embedding-8B", 4096),
         ("granite_embedding", "ibm-granite/granite-embedding-english-r2", 768),
         ("jina_embedding", "jinaai/jina-embeddings-v2-base-en", 1024),
+        ("mpnet_embedding", "sentence-transformers/all-mpnet-base-v2", 768),
     ],
 )
 def test_embedding_preset_configs(config_name, expected_model, expected_dim):
