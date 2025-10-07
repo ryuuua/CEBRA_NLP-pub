@@ -2,7 +2,7 @@
 
 This project aims to use CEBRA to construct latent space with identifiability in a text embedding model's representation.
 
-## Setting valiation
+## Setting 
 dateset=dair-ai,go_emotions,ag_news,imdb,
 embedding=bert,roberta,sentence_bert,embeddinggemma,granite_embedding,jina_embedding,qwen3_embedding\
 
