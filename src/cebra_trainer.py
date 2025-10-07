@@ -256,7 +256,8 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
                 neg_idx = dist.sample_prior(batch_size)
                 neg_mask = label_tensor[neg_idx] != label_tensor[anchor_idx]
                 while not torch.all(neg_mask):
-                    resample = dist.sample_prior((~neg_mask).sum())
+                    missing = int((~neg_mask).sum().item())
+                    resample = dist.sample_prior(missing)
                     neg_idx[~neg_mask] = resample
                     neg_mask = label_tensor[neg_idx] != label_tensor[anchor_idx]
 

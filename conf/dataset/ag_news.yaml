@@ -3,7 +3,7 @@
 name: ag_news
 source: hf
 splits: ["train", "test"]
-hf_path: "fancyzhx/ag_news"
+hf_path: "ag_news"
 text_column: "text"
 label_column: "label"
 shuffle: false

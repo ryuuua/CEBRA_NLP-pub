@@ -1,0 +1,75 @@
+# @package dataset
+
+name: twenty_newsgroups
+source: sklearn
+sklearn_dataset: "20newsgroups"
+splits: ["train", "test"]
+text_column: "text"
+label_column: "label"
+shuffle: false
+
+label_map:
+  0: "alt.atheism"
+  1: "comp.graphics"
+  2: "comp.os.ms-windows.misc"
+  3: "comp.sys.ibm.pc.hardware"
+  4: "comp.sys.mac.hardware"
+  5: "comp.windows.x"
+  6: "misc.forsale"
+  7: "rec.autos"
+  8: "rec.motorcycles"
+  9: "rec.sport.baseball"
+  10: "rec.sport.hockey"
+  11: "sci.crypt"
+  12: "sci.electronics"
+  13: "sci.med"
+  14: "sci.space"
+  15: "soc.religion.christian"
+  16: "talk.politics.guns"
+  17: "talk.politics.mideast"
+  18: "talk.politics.misc"
+  19: "talk.religion.misc"
+
+visualization:
+  emotion_order:
+    - 'alt.atheism'
+    - 'comp.graphics'
+    - 'comp.os.ms-windows.misc'
+    - 'comp.sys.ibm.pc.hardware'
+    - 'comp.sys.mac.hardware'
+    - 'comp.windows.x'
+    - 'misc.forsale'
+    - 'rec.autos'
+    - 'rec.motorcycles'
+    - 'rec.sport.baseball'
+    - 'rec.sport.hockey'
+    - 'sci.crypt'
+    - 'sci.electronics'
+    - 'sci.med'
+    - 'sci.space'
+    - 'soc.religion.christian'
+    - 'talk.politics.guns'
+    - 'talk.politics.mideast'
+    - 'talk.politics.misc'
+    - 'talk.religion.misc'
+  emotion_colors:
+    alt.atheism: '#1f77b4'
+    comp.graphics: '#ff7f0e'
+    comp.os.ms-windows.misc: '#2ca02c'
+    comp.sys.ibm.pc.hardware: '#d62728'
+    comp.sys.mac.hardware: '#9467bd'
+    comp.windows.x: '#8c564b'
+    misc.forsale: '#e377c2'
+    rec.autos: '#7f7f7f'
+    rec.motorcycles: '#bcbd22'
+    rec.sport.baseball: '#17becf'
+    rec.sport.hockey: '#aec7e8'
+    sci.crypt: '#ffbb78'
+    sci.electronics: '#98df8a'
+    sci.med: '#ff9896'
+    sci.space: '#c5b0d5'
+    soc.religion.christian: '#c49c94'
+    talk.politics.guns: '#f7b6d2'
+    talk.politics.mideast: '#c7c7c7'
+    talk.politics.misc: '#dbdb8d'
+    talk.religion.misc: '#9edae5'
