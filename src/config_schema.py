@@ -23,6 +23,7 @@ class DatasetConfig:
     multi_label: bool = False
     label_columns: Optional[List[str]] = None
     label_delimiter: Optional[str] = None
+    drop_multi_label_samples: bool = False
 
     # Kaggle datasets require a handle to download the data.
     kaggle_handle: Optional[str] = None

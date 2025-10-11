@@ -166,10 +166,23 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
             f"{dataset_cfg.source}. Supported sources are 'hf', 'csv', 'kaggle', and 'sklearn'."
         )
 
-    # Special handling for go_emotions: use only the first label
-    if dataset_cfg.name == "go_emotions" and dataset_cfg.label_column is not None:
-        print("Applying special handling for go_emotions: using only the first label.")
-        df[dataset_cfg.label_column] = df[dataset_cfg.label_column].apply(lambda x: x[0])
+    # Special handling for go_emotions variants: optionally drop multi-label rows and collapse lists.
+    if dataset_cfg.hf_path == "go_emotions" and dataset_cfg.label_column is not None:
+        label_col = dataset_cfg.label_column
+        if dataset_cfg.drop_multi_label_samples:
+            print("Applying go_emotions filter: removing multi-label samples.")
+            before_count = len(df)
+            df = df[df[label_col].apply(lambda x: isinstance(x, (list, tuple)) and len(x) == 1)].reset_index(drop=True)
+            after_count = len(df)
+            print(f"go_emotions samples after filtering: {after_count} (removed {before_count - after_count}).")
+        else:
+            print("Applying special handling for go_emotions: using only the first label.")
+        def _collapse_go_emotions_label(value):
+            if isinstance(value, (list, tuple)):
+                return value[0] if len(value) > 0 else np.nan
+            return value
+
+        df[label_col] = df[label_col].apply(_collapse_go_emotions_label)
 
     if dataset_cfg.label_column is not None and not dataset_cfg.multi_label:
         valid_labels = set(dataset_cfg.label_map.keys())
