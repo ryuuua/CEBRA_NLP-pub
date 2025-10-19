@@ -4,13 +4,43 @@ from tqdm import tqdm
 
 from src.config_schema import AppConfig
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING, Optional, Sequence
 
 if TYPE_CHECKING:
     from src.config_schema import AppConfig
 
-def get_hf_transformer_embeddings(texts, model_name, device):
-    """Generates embeddings using a standard Hugging Face Transformer (BERT, RoBERTa)."""
+def _mean_pool(hidden_state: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
+    """Apply attention-mask-aware mean pooling to a hidden state tensor."""
+    mask = attention_mask.unsqueeze(-1).type_as(hidden_state)
+    summed = (hidden_state * mask).sum(dim=1)
+    counts = mask.sum(dim=1).clamp(min=1e-9)
+    return summed / counts
+
+
+def _select_layer(
+    hidden_states: Sequence[torch.Tensor], layer_index: int, model_name: str
+) -> torch.Tensor:
+    """Return the desired hidden state layer, supporting negative indices."""
+    total_layers = len(hidden_states)
+    if layer_index < 0:
+        layer_index += total_layers
+    if layer_index < 0 or layer_index >= total_layers:
+        raise ValueError(
+            f"Layer index {layer_index} is out of bounds for model '{model_name}' "
+            f"which exposes {total_layers} hidden states."
+        )
+    return hidden_states[layer_index]
+
+
+def get_hf_transformer_embeddings(
+    texts,
+    model_name,
+    device,
+    *,
+    layer_index: Optional[int] = None,
+    trust_remote_code: bool = False,
+):
+    """Generates embeddings using a Hugging Face Transformer."""
     from transformers import AutoTokenizer, AutoModel
     from huggingface_hub.errors import GatedRepoError
 
@@ -25,7 +55,9 @@ def get_hf_transformer_embeddings(texts, model_name, device):
         raise RuntimeError(f"{guidance} Original error: {exc}") from exc
 
     try:
-        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        tokenizer = AutoTokenizer.from_pretrained(
+            model_name, trust_remote_code=trust_remote_code
+        )
     except (GatedRepoError, OSError) as exc:
         _raise_access_error(exc)
 
@@ -45,7 +77,9 @@ def get_hf_transformer_embeddings(texts, model_name, device):
                 if pad_token_id is not None:
                     tokenizer.pad_token_id = pad_token_id
     try:
-        model = AutoModel.from_pretrained(model_name).to(device)
+        model = AutoModel.from_pretrained(
+            model_name, trust_remote_code=trust_remote_code
+        ).to(device)
     except (GatedRepoError, OSError) as exc:
         _raise_access_error(exc)
     embeddings = []
@@ -59,13 +93,21 @@ def get_hf_transformer_embeddings(texts, model_name, device):
                 truncation=True,
                 max_length=128,
             ).to(device)
-            outputs = model(**inputs)
+            outputs = model(
+                **inputs, output_hidden_states=layer_index is not None
+            )
             attention_mask = inputs["attention_mask"]
-            last_hidden_state = outputs.last_hidden_state
-            mask = attention_mask.unsqueeze(-1).type_as(last_hidden_state)
-            summed = (last_hidden_state * mask).sum(dim=1)
-            counts = mask.sum(dim=1).clamp(min=1e-9)
-            batch_embeddings = (summed / counts).cpu().numpy()
+            if layer_index is None:
+                hidden_state = outputs.last_hidden_state
+            else:
+                hidden_states = outputs.hidden_states
+                if hidden_states is None:
+                    raise RuntimeError(
+                        f"Model '{model_name}' did not return hidden states even though "
+                        "one was requested."
+                    )
+                hidden_state = _select_layer(hidden_states, layer_index, model_name)
+            batch_embeddings = _mean_pool(hidden_state, attention_mask).cpu().numpy()
             embeddings.append(batch_embeddings)
     return np.vstack(embeddings)
 
@@ -133,7 +175,13 @@ def get_embeddings(texts: list, cfg: AppConfig) -> np.ndarray:
 
     if emb_cfg.type == "hf_transformer":
         # AppConfigとして扱われることで、cfg.deviceに正しくアクセスできる
-        return get_hf_transformer_embeddings(texts, emb_cfg.model_name, cfg.device)
+        return get_hf_transformer_embeddings(
+            texts,
+            emb_cfg.model_name,
+            cfg.device,
+            layer_index=emb_cfg.hidden_state_layer,
+            trust_remote_code=emb_cfg.trust_remote_code,
+        )
     elif emb_cfg.type == "sentence_transformer":
         return get_sentence_transformer_embeddings(
             texts, emb_cfg.model_name, cfg.device

@@ -1,0 +1,6 @@
+# @package embedding
+name: mistralai/Mistral-7B-v0.3
+type: hf_transformer
+model_name: mistralai/Mistral-7B-v0.3
+hidden_state_layer: -1
+output_dim: 4096

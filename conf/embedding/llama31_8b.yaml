@@ -1,0 +1,6 @@
+# @package embedding
+name: meta-llama/Llama-3.1-8B
+type: hf_transformer
+model_name: meta-llama/Llama-3.1-8B
+hidden_state_layer: -1
+output_dim: 4096

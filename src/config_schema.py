@@ -45,6 +45,8 @@ class EmbeddingConfig:
     type: str
     model_name: str
     output_dim: int = 0
+    hidden_state_layer: Optional[int] = None
+    trust_remote_code: bool = False
     # Word2Vec用のパラメータなど、特定のモデルのみで使う設定も定義可能
     vector_size: int = 100
     window: int = 5
