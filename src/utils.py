@@ -7,6 +7,8 @@ from omegaconf import OmegaConf
 import torch
 import torch.distributed as dist
 
+CACHE_VERSION = 2
+
 if TYPE_CHECKING:
     from src.config_schema import AppConfig
 
@@ -38,11 +40,36 @@ def get_embedding_cache_path(cfg):
 
     return path
 
-def save_text_embedding(ids, embeddings, shuffle_seed, path: Path):
-    """Saves numpy embeddings and their ids to the specified path."""
+def save_text_embedding(ids, embeddings, shuffle_seed, path: Path, layer_embeddings=None):
+    """
+    Saves numpy embeddings and their ids to the specified path.
+
+    Parameters
+    ----------
+    ids : array-like
+        The identifiers for each embedding row.
+    embeddings : np.ndarray
+        The embeddings associated with the provided ids.
+    shuffle_seed : Optional[int]
+        Seed used when shuffling the dataset (stored for cache validation).
+    path : Path
+        Destination file.
+    layer_embeddings : Optional[np.ndarray]
+        Mean-pooled hidden states for all transformer layers with shape
+        (num_samples, num_layers, hidden_dim). Stored when available to avoid
+        recomputing heavy transformer passes.
+    """
     print(f"Caching text embeddings to {path}...")
     path.parent.mkdir(parents=True, exist_ok=True)
-    np.savez(path, ids=ids, embeddings=embeddings, shuffle_seed=shuffle_seed)
+    save_kwargs = {
+        "ids": ids,
+        "embeddings": embeddings,
+        "shuffle_seed": shuffle_seed,
+        "cache_version": CACHE_VERSION,
+    }
+    if layer_embeddings is not None:
+        save_kwargs["layer_embeddings"] = layer_embeddings
+    np.savez(path, **save_kwargs)
 
     print("...done.")
 
@@ -55,8 +82,9 @@ def load_text_embedding(path: Path):
         ids = data["ids"]
         embeddings = data["embeddings"]
         shuffle_seed = data["shuffle_seed"].item() if "shuffle_seed" in data else None
+        layer_embeddings = data["layer_embeddings"] if "layer_embeddings" in data.files else None
         print("...done.")
-        return ids, embeddings, shuffle_seed
+        return ids, embeddings, shuffle_seed, layer_embeddings
 
     else:
         print(f"No cached text embeddings found at {path}.")

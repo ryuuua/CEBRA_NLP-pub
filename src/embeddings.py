@@ -4,10 +4,23 @@ from tqdm import tqdm
 
 from src.config_schema import AppConfig
 
-from typing import TYPE_CHECKING, Optional, Sequence
+from typing import TYPE_CHECKING, Optional, Sequence, List
 
 if TYPE_CHECKING:
     from src.config_schema import AppConfig
+
+_LAST_LAYER_CACHE: Optional[np.ndarray] = None
+
+
+def get_last_hidden_state_cache() -> Optional[np.ndarray]:
+    """Return the cached mean-pooled hidden states for all layers from the most recent transformer run."""
+    return _LAST_LAYER_CACHE
+
+
+def clear_last_hidden_state_cache() -> None:
+    """Reset the cached transformer hidden states."""
+    global _LAST_LAYER_CACHE
+    _LAST_LAYER_CACHE = None
 
 def _mean_pool(hidden_state: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
     """Apply attention-mask-aware mean pooling to a hidden state tensor."""
@@ -43,6 +56,8 @@ def get_hf_transformer_embeddings(
     """Generates embeddings using a Hugging Face Transformer."""
     from transformers import AutoTokenizer, AutoModel
     from huggingface_hub.errors import GatedRepoError
+
+    global _LAST_LAYER_CACHE
 
     def _raise_access_error(exc: Exception) -> None:
         guidance = (
@@ -83,6 +98,7 @@ def get_hf_transformer_embeddings(
     except (GatedRepoError, OSError) as exc:
         _raise_access_error(exc)
     embeddings = []
+    layer_accumulator: Optional[List[List[np.ndarray]]] = None
     with torch.no_grad():
         for i in tqdm(range(0, len(texts), 32), desc=f"Vectorizing with {model_name}"):
             batch = texts[i : i + 32]
@@ -93,22 +109,41 @@ def get_hf_transformer_embeddings(
                 truncation=True,
                 max_length=128,
             ).to(device)
-            outputs = model(
-                **inputs, output_hidden_states=layer_index is not None
-            )
+            outputs = model(**inputs, output_hidden_states=True)
             attention_mask = inputs["attention_mask"]
+            hidden_states = outputs.hidden_states
             if layer_index is None:
                 hidden_state = outputs.last_hidden_state
             else:
-                hidden_states = outputs.hidden_states
                 if hidden_states is None:
                     raise RuntimeError(
                         f"Model '{model_name}' did not return hidden states even though "
                         "one was requested."
                     )
                 hidden_state = _select_layer(hidden_states, layer_index, model_name)
-            batch_embeddings = _mean_pool(hidden_state, attention_mask).cpu().numpy()
+            pooled_selected = _mean_pool(hidden_state, attention_mask).to(
+                dtype=torch.float32
+            )
+            batch_embeddings = pooled_selected.cpu().numpy()
             embeddings.append(batch_embeddings)
+            if hidden_states is not None:
+                if layer_accumulator is None:
+                    layer_accumulator = [[] for _ in range(len(hidden_states))]
+                for idx, state in enumerate(hidden_states):
+                    pooled_tensor = _mean_pool(state, attention_mask).to(
+                        dtype=torch.float32
+                    )
+                    pooled = pooled_tensor.cpu().numpy()
+                    layer_accumulator[idx].append(pooled)
+    if layer_accumulator is not None:
+        per_layer = [
+            np.vstack(chunks).astype(np.float32, copy=False)
+            for chunks in layer_accumulator
+        ]
+        layer_cache = np.stack(per_layer, axis=1)
+    else:
+        layer_cache = None
+    _LAST_LAYER_CACHE = layer_cache
     return np.vstack(embeddings)
 
 
@@ -116,6 +151,7 @@ def get_sentence_transformer_embeddings(texts, model_name, device):
     """Generates embeddings using the SentenceTransformers library."""
     from sentence_transformers import SentenceTransformer
 
+    clear_last_hidden_state_cache()
     model = SentenceTransformer(model_name, device=device)
     return model.encode(texts, show_progress_bar=True)
 
@@ -124,6 +160,7 @@ def get_word2vec_embeddings(texts, w2v_params, cfg: Optional[AppConfig] = None):
     """Trains a Word2Vec model and generates sentence embeddings by averaging word vectors."""
     from gensim.models import Word2Vec
 
+    clear_last_hidden_state_cache()
     print("Training Word2Vec model from scratch...")
     # Simple tokenization
     tokenized_sentences = [text.lower().split() for text in texts]
@@ -170,6 +207,7 @@ def get_word2vec_embeddings(texts, w2v_params, cfg: Optional[AppConfig] = None):
 def get_embeddings(texts: list, cfg: AppConfig) -> np.ndarray:
 
     """Factory function to select and run the appropriate embedding model."""
+    clear_last_hidden_state_cache()
     emb_cfg = cfg.embedding
     print(f"\n--- Generating embeddings using model: {emb_cfg.name} ---")
 

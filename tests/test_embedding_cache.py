@@ -78,8 +78,11 @@ def run_once(cfg):
     cache_path = get_embedding_cache_path(cfg)
     cache = load_text_embedding(cache_path)
     seed = cfg.dataset.shuffle_seed
-    if cache is not None and cache[2] == seed:
-        cached_ids, cached_emb, _ = cache
+    if cache is not None:
+        cached_ids, cached_emb, cached_seed, _ = cache
+    else:
+        cached_seed = None
+    if cache is not None and cached_seed == seed:
         id_to_idx = {str(i): idx for idx, i in enumerate(cached_ids)}
         embeddings_arr = np.stack([cached_emb[id_to_idx[str(i)]] for i in ids])
     else:
