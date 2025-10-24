@@ -1,7 +1,7 @@
 # src/config_schema.py
 
 from dataclasses import dataclass, field
-from typing import List, Dict, Any, Optional, Literal
+from typing import List, Dict, Any, Optional
 
 @dataclass
 class VisualizationConfig:
@@ -76,7 +76,7 @@ class EvaluationConfig:
     random_state: int
     knn_neighbors: int
     enable_plots: bool = True
-    knn_backend: Literal["auto", "sklearn", "cuml", "faiss"] = "auto"
+    knn_backend: str = "auto"
     faiss_gpu_id: int = 0
 
 
