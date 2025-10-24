@@ -269,7 +269,9 @@ def main(cfg: AppConfig) -> None:
                 train_embeddings=cebra_train_embeddings, valid_embeddings=cebra_valid_embeddings,
                 y_train=conditional_train, y_valid=conditional_valid,
                 label_map=label_map, output_dir=output_dir, knn_neighbors=cfg.evaluation.knn_neighbors,
-                enable_plots=cfg.evaluation.enable_plots
+                enable_plots=cfg.evaluation.enable_plots,
+                backend=cfg.evaluation.knn_backend,
+                faiss_gpu_id=cfg.evaluation.faiss_gpu_id,
             )
             if is_main_process and wandb.run is not None:
                 wandb.log({"knn_accuracy": accuracy})
@@ -311,7 +313,9 @@ def main(cfg: AppConfig) -> None:
             mse, r2 = run_knn_regression(
                 train_embeddings=cebra_train_embeddings, valid_embeddings=cebra_valid_embeddings,
                 y_train=conditional_train, y_valid=conditional_valid,
-                output_dir=output_dir, knn_neighbors=cfg.evaluation.knn_neighbors
+                output_dir=output_dir, knn_neighbors=cfg.evaluation.knn_neighbors,
+                backend=cfg.evaluation.knn_backend,
+                faiss_gpu_id=cfg.evaluation.faiss_gpu_id,
             )
             if is_main_process and wandb.run is not None:
                 wandb.log({"knn_regression_mse": mse, "knn_regression_r2": r2})

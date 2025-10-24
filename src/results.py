@@ -9,6 +9,7 @@ import plotly.express as px
 import matplotlib.pyplot as plt
 import seaborn as sns
 import umap
+import numpy as np
 from pathlib import Path
 from sklearn.decomposition import PCA
 from typing import Optional
@@ -17,6 +18,7 @@ from sklearn.metrics import (
     accuracy_score,
     classification_report,
     ConfusionMatrixDisplay,
+    confusion_matrix,
 )
 import os
 import tempfile
@@ -32,6 +34,29 @@ import gc
 import cebra
 from .cebra_trainer import normalize_model_architecture
 
+_CUML_AVAILABLE = False
+try:
+    import cupy as cp
+    from cuml.decomposition import PCA as cuPCA
+    from cuml.manifold import UMAP as cuUMAP
+    from cuml.neighbors import KNeighborsClassifier as cuKNeighborsClassifier
+    from cuml.neighbors import KNeighborsRegressor as cuKNeighborsRegressor
+
+    _CUML_AVAILABLE = True
+except (ImportError, ModuleNotFoundError, RuntimeError):
+    cp = None  # type: ignore[assignment]
+    cuPCA = cuUMAP = cuKNeighborsClassifier = cuKNeighborsRegressor = None
+
+_FAISS_AVAILABLE = False
+_FAISS_GPU_AVAILABLE = False
+try:
+    import faiss  # type: ignore[assignment]
+
+    _FAISS_AVAILABLE = True
+    _FAISS_GPU_AVAILABLE = hasattr(faiss, "StandardGpuResources")
+except (ImportError, ModuleNotFoundError):
+    faiss = None  # type: ignore[assignment]
+
 # train_test_splitはこのファイルで使われていないため削除
 
 
@@ -39,6 +64,135 @@ def clear_cuda_cache() -> None:
     """Clear the CUDA cache if running on a GPU."""
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+
+
+def _read_env_flag(name: str) -> Optional[bool]:
+    value = os.getenv(name)
+    if value is None:
+        return None
+    lowered = value.strip().lower()
+    if lowered in {"1", "true", "yes", "on"}:
+        return True
+    if lowered in {"0", "false", "no", "off"}:
+        return False
+    return None
+
+
+def _should_use_cuml(cfg: Optional[AppConfig] = None, override: Optional[bool] = None) -> bool:
+    """Decide whether to use cuML-backed implementations."""
+    if not _CUML_AVAILABLE:
+        return False
+    if override is not None:
+        return override
+
+    if _read_env_flag("CEBRA_DISABLE_CUML") is True:
+        return False
+    if _read_env_flag("CEBRA_FORCE_CUML") is True:
+        return True
+
+    if cfg is not None:
+        device = getattr(cfg, "device", "")
+        if isinstance(device, str) and device.lower().startswith("cuda"):
+            return True
+
+    return torch.cuda.is_available()
+
+
+def _to_gpu_array(array):
+    if cp is None:  # pragma: no cover - defensive guard
+        raise RuntimeError("cuML requested but CuPy is not available.")
+    if isinstance(array, cp.ndarray):
+        return array
+    return cp.asarray(array)
+
+
+def _to_cpu_numpy(array):
+    if cp is not None and isinstance(array, cp.ndarray):
+        return cp.asnumpy(array)
+    if isinstance(array, np.ndarray):
+        return array
+    return np.asarray(array)
+
+
+def _resolve_faiss_backend(use_gpu: bool | None, *, strict: bool = False) -> tuple[bool, bool]:
+    """Return (is_available, use_gpu) for FAISS based on requested policy."""
+    if not _FAISS_AVAILABLE:
+        return False, False
+    gpu_possible = bool(_FAISS_GPU_AVAILABLE and torch.cuda.is_available())
+    if use_gpu is True:
+        if not gpu_possible:
+            if strict:
+                raise RuntimeError(
+                    "FAISS GPU backend requested but no CUDA-enabled FAISS build is available."
+                )
+            return True, False
+        return True, True
+    if use_gpu is False:
+        return True, False
+    # use_gpu is None: pick GPU when possible
+    return True, gpu_possible
+
+
+def _faiss_knn_search(
+    train_matrix: np.ndarray,
+    query_matrix: np.ndarray,
+    k: int,
+    *,
+    use_gpu: bool,
+    gpu_id: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    if not _FAISS_AVAILABLE:
+        raise RuntimeError("FAISS backend requested but `faiss` is not installed.")
+
+    train32 = np.asarray(train_matrix, dtype=np.float32, order="C")
+    query32 = np.asarray(query_matrix, dtype=np.float32, order="C")
+    if train32.shape[1] != query32.shape[1]:
+        raise ValueError(
+            "Training and query embeddings must have the same dimensionality for FAISS."
+        )
+
+    index = faiss.IndexFlatL2(train32.shape[1])  # type: ignore[attr-defined]
+    res = None
+    if use_gpu:
+        if not _FAISS_GPU_AVAILABLE:
+            raise RuntimeError(
+                "FAISS GPU backend requested but `faiss-gpu` is not available."
+            )
+        res = faiss.StandardGpuResources()  # type: ignore[attr-defined]
+        index = faiss.index_cpu_to_gpu(res, gpu_id, index)  # type: ignore[attr-defined]
+
+    index.add(train32)
+    distances, indices = index.search(query32, k)
+    return distances, indices
+
+
+def _faiss_weighted_classification(
+    neighbor_labels: np.ndarray,
+    weights: np.ndarray,
+    all_labels: np.ndarray,
+) -> np.ndarray:
+    """Compute weighted majority votes given neighbor labels and weights."""
+    label_to_pos = {int(label): idx for idx, label in enumerate(all_labels)}
+    num_queries, _ = neighbor_labels.shape
+    scores = np.zeros((num_queries, len(all_labels)), dtype=np.float64)
+
+    for row in range(num_queries):
+        label_indices = [label_to_pos[int(lbl)] for lbl in neighbor_labels[row]]
+        np.add.at(scores[row], label_indices, weights[row])
+
+    predicted_indices = scores.argmax(axis=1)
+    return all_labels[predicted_indices]
+
+
+def _faiss_weighted_regression(
+    neighbor_targets: np.ndarray,
+    weights: np.ndarray,
+) -> np.ndarray:
+    """Return weighted average of neighbor targets."""
+    weight_sum = weights.sum(axis=1, keepdims=True)
+    weight_sum = np.where(weight_sum == 0.0, 1e-12, weight_sum)
+    weighted_sum = np.sum(neighbor_targets * weights[..., None], axis=1)
+    return weighted_sum / weight_sum
 
 
 def save_interactive_plot(
@@ -124,7 +278,19 @@ def save_static_2d_plots(
     """Generates and saves 2D static plots using PCA and UMAP."""
     print("Generating static 2D scatter plots using PCA and UMAP...")
 
-    pca_model = PCA(n_components=2)
+    embeddings_np = np.asarray(embeddings)
+    use_gpu_backend = _should_use_cuml(cfg)
+    embeddings_gpu = None
+    if use_gpu_backend:
+        try:
+            embeddings_gpu = _to_gpu_array(embeddings_np)
+        except Exception as err:  # pragma: no cover - GPU initialisation specific
+            print(
+                f"cuML backend requested but moving embeddings to GPU failed ({err}); "
+                "falling back to CPU implementations."
+            )
+            use_gpu_backend = False
+
     reproducibility = getattr(cfg, "reproducibility", None) if cfg is not None else None
     deterministic = bool(getattr(reproducibility, "deterministic", False))
     umap_seed = None
@@ -135,13 +301,42 @@ def save_static_2d_plots(
             if eval_cfg is not None:
                 umap_seed = getattr(eval_cfg, "random_state", None)
 
-    umap_kwargs = dict(n_components=2, n_neighbors=15, min_dist=0.1, n_jobs=1 if deterministic else -1)
+    umap_base_kwargs = dict(n_components=2, n_neighbors=15, min_dist=0.1)
     if deterministic and umap_seed is not None:
-        umap_kwargs["random_state"] = umap_seed
+        umap_base_kwargs["random_state"] = umap_seed
 
-    umap_model = umap.UMAP(**umap_kwargs)
-    X_pca = pca_model.fit_transform(embeddings)
-    variance_ratios = pca_model.explained_variance_ratio_
+    X_pca = None
+    variance_ratios = None
+    if use_gpu_backend and cuPCA is not None and embeddings_gpu is not None:
+        try:
+            pca_gpu = cuPCA(n_components=2)
+            X_pca = _to_cpu_numpy(pca_gpu.fit_transform(embeddings_gpu))
+            variance_ratios = _to_cpu_numpy(pca_gpu.explained_variance_ratio_)
+            print("PCA: using cuML implementation.")
+        except Exception as err:  # pragma: no cover - GPU specific failure path
+            print(f"cuML PCA failed ({err}); reverting to scikit-learn PCA.")
+
+    if X_pca is None or variance_ratios is None:
+        pca_model = PCA(n_components=2)
+        X_pca = pca_model.fit_transform(embeddings_np)
+        variance_ratios = pca_model.explained_variance_ratio_
+
+    X_umap = None
+    if use_gpu_backend and cuUMAP is not None and embeddings_gpu is not None:
+        try:
+            umap_gpu = cuUMAP(**umap_base_kwargs)
+            X_umap = _to_cpu_numpy(umap_gpu.fit_transform(embeddings_gpu))
+            print("UMAP: using cuML implementation.")
+        except Exception as err:  # pragma: no cover - GPU specific failure path
+            print("cuML UMAP failed "
+                  f"({err}); reverting to umap-learn CPU implementation.")
+
+    if X_umap is None:
+        cpu_umap_kwargs = dict(umap_base_kwargs)
+        cpu_umap_kwargs["n_jobs"] = 1 if deterministic else -1
+        umap_model = umap.UMAP(**cpu_umap_kwargs)
+        X_umap = umap_model.fit_transform(embeddings_np)
+
     print(
         "PCA explained variance ratios:",
         ", ".join(f"{ratio * 100:.2f}%" for ratio in variance_ratios),
@@ -157,7 +352,6 @@ def save_static_2d_plots(
                 for i, ratio in enumerate(variance_ratios)
             }
         )
-    X_umap = umap_model.fit_transform(embeddings)
 
     for X_reduced, name in [(X_pca, "PCA"), (X_umap, "UMAP")]:
         plt.figure(figsize=(12, 10))
@@ -194,38 +388,135 @@ def run_knn_classification(
     knn_neighbors,
 
     enable_plots: bool = True,
+    backend: str = "auto",
+    use_gpu: bool | None = None,
+    faiss_gpu_id: int = 0,
 
 ):
     """k-NN classification for discrete labels."""
     print("\nRunning k-NN Classification evaluation...")
-    knn = KNeighborsClassifier(n_neighbors=knn_neighbors, weights="distance")
-    knn.fit(train_embeddings, y_train)
-    y_pred = knn.predict(valid_embeddings)
+    if use_gpu is True and not torch.cuda.is_available():
+        raise RuntimeError("GPU execution requested for k-NN but CUDA is not available.")
 
-    accuracy = accuracy_score(y_valid, y_pred)
+    train_cpu = np.asarray(train_embeddings, dtype=np.float32)
+    valid_cpu = np.asarray(valid_embeddings, dtype=np.float32)
+    y_train_cpu = np.asarray(y_train)
+    y_valid_cpu = np.asarray(y_valid)
+    if y_train_cpu.ndim != 1:
+        raise ValueError("y_train must be a 1D array for classification tasks.")
+    y_train_cpu = y_train_cpu.astype(np.int64, copy=False)
+    y_valid_cpu = y_valid_cpu.astype(np.int64, copy=False)
+
+    backend_choice = (backend or "auto").lower()
+    prefer_gpu = torch.cuda.is_available() if use_gpu is None else bool(use_gpu)
+    faiss_use_gpu = False
+
+    if backend_choice == "auto":
+        use_cuml = prefer_gpu and _should_use_cuml()
+        if use_cuml:
+            selected_backend = "cuml"
+        else:
+            faiss_available, faiss_use_gpu = _resolve_faiss_backend(
+                None if use_gpu is None else prefer_gpu,
+                strict=False,
+            )
+            selected_backend = "faiss" if faiss_available else "sklearn"
+    elif backend_choice == "cuml":
+        if _read_env_flag("CEBRA_DISABLE_CUML") is True:
+            raise RuntimeError("cuML backend is disabled via CEBRA_DISABLE_CUML.")
+        if not _CUML_AVAILABLE:
+            raise RuntimeError("cuML backend requested but cuML is not installed.")
+        if not torch.cuda.is_available():
+            raise RuntimeError("cuML backend requested but no CUDA device is available.")
+        if use_gpu is False:
+            raise RuntimeError("cuML backend requires GPU execution (use_gpu=True).")
+        selected_backend = "cuml"
+    elif backend_choice == "faiss":
+        faiss_available, faiss_use_gpu = _resolve_faiss_backend(
+            prefer_gpu,
+            strict=True,
+        )
+        if not faiss_available:
+            raise RuntimeError("FAISS backend requested but faiss is not installed.")
+        selected_backend = "faiss"
+    else:
+        selected_backend = "sklearn"
+
+    y_pred = None
+    knn_cpu_model: KNeighborsClassifier | None = None
+    knn_backend_printed = False
+
+    if selected_backend == "cuml" and cuKNeighborsClassifier is not None:
+        try:
+            knn_gpu = cuKNeighborsClassifier(
+                n_neighbors=knn_neighbors,
+                weights="distance",
+            )
+            knn_gpu.fit(_to_gpu_array(train_cpu), _to_gpu_array(y_train_cpu))
+            y_pred = _to_cpu_numpy(knn_gpu.predict(_to_gpu_array(valid_cpu)))
+            y_pred = y_pred.astype(y_valid_cpu.dtype, copy=False)
+            print("k-NN Classification: using cuML backend.")
+            knn_backend_printed = True
+        except Exception as err:  # pragma: no cover - GPU specific failure path
+            print(f"cuML k-NN classification failed ({err}); falling back to scikit-learn.")
+            selected_backend = "sklearn"
+
+    if y_pred is None and selected_backend == "faiss":
+        print(
+            f"k-NN Classification: using FAISS {'GPU' if faiss_use_gpu else 'CPU'} backend."
+        )
+        knn_backend_printed = True
+        distances, indices = _faiss_knn_search(
+            train_cpu,
+            valid_cpu,
+            knn_neighbors,
+            use_gpu=faiss_use_gpu,
+            gpu_id=faiss_gpu_id,
+        )
+        distances = np.sqrt(np.maximum(np.asarray(distances, dtype=np.float64), 0.0))
+        # Avoid division by zero
+        weights = 1.0 / np.maximum(distances, 1e-12)
+        neighbor_labels = y_train_cpu[indices.astype(np.int64, copy=False)]
+        all_labels = np.array(sorted(label_map.keys()), dtype=np.int64)
+        y_pred = _faiss_weighted_classification(neighbor_labels, weights, all_labels)
+
+    if y_pred is None:
+        if not knn_backend_printed:
+            print("k-NN Classification: using scikit-learn backend.")
+        knn_cpu_model = KNeighborsClassifier(n_neighbors=knn_neighbors, weights="distance")
+        knn_cpu_model.fit(train_cpu, y_train_cpu)
+        y_pred = knn_cpu_model.predict(valid_cpu)
+
+    y_pred = np.asarray(y_pred)
+    accuracy = accuracy_score(y_valid_cpu, y_pred)
     report = classification_report(
-        y_valid,
+        y_valid_cpu,
         y_pred,
         target_names=list(label_map.values()),
         output_dict=True,
         zero_division=0,
     )
-
     print(f"k-NN Accuracy on Validation Set: {accuracy:.4f}")
 
     # --- Confusion Matrix ---
     if enable_plots:
         cm_plot_file = output_dir / "confusion_matrix.png"
         fig, ax = plt.subplots(figsize=(10, 8))
-        ConfusionMatrixDisplay.from_estimator(
-            knn,
-            valid_embeddings,
-            y_valid,
-            display_labels=list(label_map.values()),
-            cmap=plt.cm.Blues,
-            ax=ax,
-            xticks_rotation="vertical",
-        )
+        display_labels = list(label_map.values())
+        if knn_cpu_model is not None:
+            ConfusionMatrixDisplay.from_estimator(
+                knn_cpu_model,
+                valid_cpu,
+                y_valid_cpu,
+                display_labels=display_labels,
+                cmap=plt.cm.Blues,
+                ax=ax,
+                xticks_rotation="vertical",
+            )
+        else:
+            cm = confusion_matrix(y_valid_cpu, y_pred)
+            disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=display_labels)
+            disp.plot(cmap=plt.cm.Blues, ax=ax, xticks_rotation="vertical")
         ax.set_title(f"Confusion Matrix (k-NN={knn_neighbors})")
         plt.tight_layout()
         plt.savefig(cm_plot_file)
@@ -242,16 +533,101 @@ def run_knn_regression(
     y_valid,
     output_dir: Path,
     knn_neighbors,
+    backend: str = "auto",
+    use_gpu: bool | None = None,
+    faiss_gpu_id: int = 0,
 ):
     """k-NN regression for continuous labels (e.g., VAD)."""
     print("\nRunning k-NN Regression evaluation...")
 
-    knn = KNeighborsRegressor(n_neighbors=knn_neighbors, weights="distance")
-    knn.fit(train_embeddings, y_train)
-    y_pred = knn.predict(valid_embeddings)
+    if use_gpu is True and not torch.cuda.is_available():
+        raise RuntimeError("GPU execution requested for k-NN but CUDA is not available.")
 
-    mse = mean_squared_error(y_valid, y_pred)
-    r2 = r2_score(y_valid, y_pred)
+    train_cpu = np.asarray(train_embeddings, dtype=np.float32)
+    valid_cpu = np.asarray(valid_embeddings, dtype=np.float32)
+    y_train_cpu = np.asarray(y_train, dtype=np.float32)
+    y_valid_cpu = np.asarray(y_valid, dtype=np.float32)
+
+    backend_choice = (backend or "auto").lower()
+    prefer_gpu = torch.cuda.is_available() if use_gpu is None else bool(use_gpu)
+    faiss_use_gpu = False
+
+    if backend_choice == "auto":
+        use_cuml = prefer_gpu and _should_use_cuml()
+        if use_cuml:
+            selected_backend = "cuml"
+        else:
+            faiss_available, faiss_use_gpu = _resolve_faiss_backend(
+                None if use_gpu is None else prefer_gpu,
+                strict=False,
+            )
+            selected_backend = "faiss" if faiss_available else "sklearn"
+    elif backend_choice == "cuml":
+        if _read_env_flag("CEBRA_DISABLE_CUML") is True:
+            raise RuntimeError("cuML backend is disabled via CEBRA_DISABLE_CUML.")
+        if not _CUML_AVAILABLE:
+            raise RuntimeError("cuML backend requested but cuML is not installed.")
+        if not torch.cuda.is_available():
+            raise RuntimeError("cuML backend requested but no CUDA device is available.")
+        if use_gpu is False:
+            raise RuntimeError("cuML backend requires GPU execution (use_gpu=True).")
+        selected_backend = "cuml"
+    elif backend_choice == "faiss":
+        faiss_available, faiss_use_gpu = _resolve_faiss_backend(
+            prefer_gpu,
+            strict=True,
+        )
+        if not faiss_available:
+            raise RuntimeError("FAISS backend requested but faiss is not installed.")
+        selected_backend = "faiss"
+    else:
+        selected_backend = "sklearn"
+
+    y_pred = None
+
+    if selected_backend == "cuml" and cuKNeighborsRegressor is not None:
+        try:
+            knn_gpu = cuKNeighborsRegressor(
+                n_neighbors=knn_neighbors,
+                weights="distance",
+            )
+            knn_gpu.fit(_to_gpu_array(train_cpu), _to_gpu_array(y_train_cpu))
+            y_pred = _to_cpu_numpy(knn_gpu.predict(_to_gpu_array(valid_cpu)))
+            print("k-NN Regression: using cuML backend.")
+        except Exception as err:  # pragma: no cover - GPU specific failure path
+            print(f"cuML k-NN regression failed ({err}); falling back to scikit-learn.")
+            selected_backend = "sklearn"
+
+    if y_pred is None and selected_backend == "faiss":
+        print(
+            f"k-NN Regression: using FAISS {'GPU' if faiss_use_gpu else 'CPU'} backend."
+        )
+        distances, indices = _faiss_knn_search(
+            train_cpu,
+            valid_cpu,
+            knn_neighbors,
+            use_gpu=faiss_use_gpu,
+            gpu_id=faiss_gpu_id,
+        )
+        distances = np.sqrt(np.maximum(np.asarray(distances, dtype=np.float64), 0.0))
+        weights = 1.0 / np.maximum(distances, 1e-12)
+        y_train_matrix = y_train_cpu
+        if y_train_matrix.ndim == 1:
+            y_train_matrix = y_train_matrix[:, None]
+        neighbor_targets = y_train_matrix[indices.astype(np.int64, copy=False)]
+        preds_matrix = _faiss_weighted_regression(neighbor_targets, weights)
+        y_pred = preds_matrix[:, 0] if y_train_cpu.ndim == 1 else preds_matrix
+
+    if y_pred is None:
+        print("k-NN Regression: using scikit-learn backend.")
+        knn = KNeighborsRegressor(n_neighbors=knn_neighbors, weights="distance")
+        knn.fit(train_cpu, y_train_cpu)
+        y_pred = knn.predict(valid_cpu)
+
+    y_pred = np.asarray(y_pred)
+
+    mse = mean_squared_error(y_valid_cpu, y_pred)
+    r2 = r2_score(y_valid_cpu, y_pred)
 
     print(f"k-NN Regression MSE on Validation Set: {mse:.4f}")
     print(f"k-NN Regression R2 Score on Validation Set: {r2:.4f}")
