@@ -54,7 +54,10 @@ try:
 
     _FAISS_AVAILABLE = True
     _FAISS_GPU_AVAILABLE = hasattr(faiss, "StandardGpuResources")
-except (ImportError, ModuleNotFoundError):
+except (ImportError, ModuleNotFoundError, OSError):
+    # OSError can be raised when GPU builds are present but incompatible with the
+    # installed CUDA runtime. Treat this the same as faiss being unavailable so the
+    # rest of the pipeline can gracefully fall back to scikit-learn implementations.
     faiss = None  # type: ignore[assignment]
 
 # train_test_splitはこのファイルで使われていないため削除
