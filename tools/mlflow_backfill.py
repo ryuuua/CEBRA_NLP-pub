@@ -661,7 +661,9 @@ def ingest_run(run_dir: Path, skip_artifacts: bool = False, skip_duplicates: boo
                 # Visualization directories (if present) should also become artifacts
                 visualization_dirs = [
                     run_dir / "visualization",
+                    run_dir / "visualizations",
                     run_dir / "artifacts" / "visualization",
+                    run_dir / "artifacts" / "visualizations",
                 ]
                 uploaded_visualizations = 0
                 seen_visualization_paths = set()
