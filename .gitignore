@@ -15,6 +15,7 @@
 !conf/
 !scripts/
 !tests/
+!tools/
 
 # 許可したディレクトリ配下の中身も許可（重要）
 !src/**
