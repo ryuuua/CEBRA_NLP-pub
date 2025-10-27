@@ -334,6 +334,7 @@ def discover_artifacts_in_run(run_dir: Path) -> list:
         "cebra_embeddings.npy", 
         "confusion_matrix.png",
         "cebra_interactive_discrete.html",
+        "cebra_interactive_discrete.svg",
         "static_PCA_plot.png",
         "static_UMAP_plot.png",
         "None.html",
@@ -355,7 +356,7 @@ def discover_artifacts_in_run(run_dir: Path) -> list:
     for file_path in run_dir.iterdir():
         if file_path.is_file() and file_path.name not in standard_artifacts:
             # 特定の拡張子のファイルをアーティファクトとして追加
-            if file_path.suffix.lower() in ['.png', '.jpg', '.jpeg', '.html', '.json', '.csv', '.txt', '.log', '.pt', '.pkl', '.npy', '.npz']:
+            if file_path.suffix.lower() in ['.png', '.jpg', '.jpeg', '.html', '.json', '.csv', '.txt', '.log', '.pt', '.pkl', '.npy', '.npz', '.svg']:
                 try:
                     file_size = file_path.stat().st_size
                     if file_size > 0 and os.access(file_path, os.R_OK):
