@@ -47,37 +47,53 @@ def flatten_dict(data: Dict[str, Any], prefix: str = "") -> Dict[str, Any]:
     return flat
 
 
-def log_artifact_if_exists(path: Path, retry_count: int = 3) -> bool:
+def log_artifact_if_exists(path: Path, retry_count: int = 3, artifact_path: Optional[str] = None) -> bool:
     """Upload artifact if present, with retry mechanism and detailed error logging."""
     if not path.exists():
         logger.debug(f"Artifact {path} does not exist, skipping")
         return False
-    
-    # Validate file before upload
-    try:
-        file_size = path.stat().st_size
-        if file_size == 0:
-            logger.warning(f"Artifact {path} is empty (0 bytes), skipping")
+
+    # Directory upload path
+    if path.is_dir():
+        try:
+            if not any(path.iterdir()):
+                logger.warning(f"Artifact directory {path} is empty, skipping")
+                return False
+        except OSError as exc:
+            logger.error(f"Cannot access artifact directory {path}: {exc}")
             return False
-        if file_size > 100 * 1024 * 1024:  # 100MB limit
-            logger.warning(f"Artifact {path} is too large ({file_size} bytes), skipping")
+        target_artifact_path = artifact_path or path.name
+    else:
+        # Validate file before upload
+        try:
+            file_size = path.stat().st_size
+            if file_size == 0:
+                logger.warning(f"Artifact {path} is empty (0 bytes), skipping")
+                return False
+            if file_size > 100 * 1024 * 1024:  # 100MB limit
+                logger.warning(f"Artifact {path} is too large ({file_size} bytes), skipping")
+                return False
+            logger.debug(f"Artifact {path} size: {file_size} bytes")
+
+            # Check file permissions
+            if not os.access(path, os.R_OK):
+                logger.error(f"Artifact {path} is not readable, skipping")
+                return False
+
+        except OSError as exc:
+            logger.error(f"Cannot access artifact {path}: {exc}")
             return False
-        logger.debug(f"Artifact {path} size: {file_size} bytes")
-        
-        # Check file permissions
-        if not os.access(path, os.R_OK):
-            logger.error(f"Artifact {path} is not readable, skipping")
-            return False
-            
-    except OSError as exc:
-        logger.error(f"Cannot access artifact {path}: {exc}")
-        return False
     
     for attempt in range(retry_count):
         try:
-            logger.info(f"Uploading artifact: {path} (attempt {attempt + 1}/{retry_count})")
-            mlflow.log_artifact(str(path))
-            logger.info(f"Successfully uploaded artifact: {path}")
+            if path.is_dir():
+                logger.info(f"Uploading artifact directory: {path} (attempt {attempt + 1}/{retry_count})")
+                mlflow.log_artifacts(str(path), artifact_path=target_artifact_path)
+                logger.info(f"Successfully uploaded artifact directory: {path}")
+            else:
+                logger.info(f"Uploading artifact: {path} (attempt {attempt + 1}/{retry_count})")
+                mlflow.log_artifact(str(path))
+                logger.info(f"Successfully uploaded artifact: {path}")
             return True
         except MlflowException as exc:
             error_msg = str(exc)
@@ -507,11 +523,13 @@ def ingest_run(run_dir: Path, skip_artifacts: bool = False, skip_duplicates: boo
         wandb_project = extract_wandb_project(wandb_run_id) if wandb_run_id else None
         wandb_run_name = extract_wandb_run_name(wandb_run_id) if wandb_run_id else None
 
-        # W&B実験名ごとにMLflow実験を分離（Minio側で分かりやすくするため階層構造を改善）
-        if wandb_run_name:
-            experiment_name = f"CEBRA/{dataset_name}/{wandb_project or 'default'}/{wandb_run_name}"
+        # Use W&B project as the MLflow experiment when available
+        if wandb_project:
+            experiment_name = wandb_project
+        elif dataset_name:
+            experiment_name = f"CEBRA/{dataset_name}"
         else:
-            experiment_name = f"CEBRA/{dataset_name}/{wandb_project or 'default'}"
+            experiment_name = "CEBRA/default"
 
         logger.info(f"Setting experiment: {experiment_name}")
         mlflow.set_experiment(experiment_name)
@@ -639,6 +657,30 @@ def ingest_run(run_dir: Path, skip_artifacts: bool = False, skip_duplicates: boo
                         uploaded_count += 1
                     else:
                         failed_artifacts.append(config_name)
+
+                # Visualization directories (if present) should also become artifacts
+                visualization_dirs = [
+                    run_dir / "visualization",
+                    run_dir / "artifacts" / "visualization",
+                ]
+                uploaded_visualizations = 0
+                seen_visualization_paths = set()
+                for viz_dir in visualization_dirs:
+                    if not viz_dir.exists() or not viz_dir.is_dir():
+                        continue
+                    resolved_path = str(viz_dir.resolve())
+                    if resolved_path in seen_visualization_paths:
+                        continue
+                    seen_visualization_paths.add(resolved_path)
+                    if log_artifact_if_exists(viz_dir, artifact_path="visualization"):
+                        uploaded_count += 1
+                        uploaded_visualizations += 1
+                        logger.info(f"Visualization directory uploaded from {viz_dir}")
+                    else:
+                        failed_artifacts.append(f"{viz_dir.name}/")
+                        logger.warning(f"Failed to upload visualization directory from {viz_dir}")
+                if uploaded_visualizations:
+                    mlflow.set_tag("visualization_artifact_uploaded", str(uploaded_visualizations))
                 
                 total_artifacts = len(valid_artifacts) + len(invalid_artifacts)
                 logger.info(f"Artifact upload summary: {uploaded_count}/{len(valid_artifacts)} valid artifacts uploaded successfully")
