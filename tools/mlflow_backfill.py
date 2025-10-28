@@ -684,6 +684,31 @@ def ingest_run(run_dir: Path, skip_artifacts: bool = False, skip_duplicates: boo
                 if uploaded_visualizations:
                     mlflow.set_tag("visualization_artifact_uploaded", str(uploaded_visualizations))
                 
+                # Linear ICA directories should also be uploaded when present
+                linear_ica_dirs = [
+                    run_dir / "Linear_ICA",
+                    run_dir / "artifacts" / "Linear_ICA",
+                ]
+                uploaded_linear_ica = 0
+                seen_linear_ica_paths = set()
+                for ica_dir in linear_ica_dirs:
+                    if not ica_dir.exists() or not ica_dir.is_dir():
+                        continue
+                    resolved_path = str(ica_dir.resolve())
+                    if resolved_path in seen_linear_ica_paths:
+                        continue
+                    seen_linear_ica_paths.add(resolved_path)
+                    artifact_destination = ica_dir.relative_to(run_dir).as_posix()
+                    if log_artifact_if_exists(ica_dir, artifact_path=artifact_destination):
+                        uploaded_count += 1
+                        uploaded_linear_ica += 1
+                        logger.info(f"Linear ICA directory uploaded from {ica_dir} to artifact path '{artifact_destination}'")
+                    else:
+                        failed_artifacts.append(f"{artifact_destination}/")
+                        logger.warning(f"Failed to upload Linear ICA directory from {ica_dir}")
+                if uploaded_linear_ica:
+                    mlflow.set_tag("linear_ica_artifact_uploaded", str(uploaded_linear_ica))
+                
                 total_artifacts = len(valid_artifacts) + len(invalid_artifacts)
                 logger.info(f"Artifact upload summary: {uploaded_count}/{len(valid_artifacts)} valid artifacts uploaded successfully")
                 logger.info(f"Total artifacts discovered: {len(discovered_artifacts)} (valid: {len(valid_artifacts)}, invalid: {len(invalid_artifacts)})")
