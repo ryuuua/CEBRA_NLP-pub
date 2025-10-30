@@ -3,30 +3,51 @@ set -u
 set -o pipefail
 
 # ====== 固定設定 ======
-EMB="mpnet_embedding"
-DATASETS=(go_emotions_single_label)
+# 対象データセットと使用する埋め込み
+DATASETS=(go_emotions_6labels)
+EMBEDDINGS=(
+  bert
+  roberta
+  mpnet_embedding
+  sentence_bert
+  qwen3_embedding
+  embeddinggemma
+  granite_embedding
+  jina_embedding
+)
 MODELS=(offset1-model-mse-lr offset1-model-v4-lr)
 
 # --- dataset|model ごとの出力次元 ---
 declare -A DIMS_MAP
 DIMS_MAP["go_emotions_single_label|offset1-model-mse-lr"]="2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 27 28"
 DIMS_MAP["go_emotions_single_label|offset1-model-v4-lr"]="2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 27 28"
+DIMS_MAP["go_emotions_6labels|offset1-model-mse-lr"]="2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 27 28"
+DIMS_MAP["go_emotions_6labels|offset1-model-v4-lr"]="2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 27 28"
 
 # --- iteration 設定 ---
 DEFAULT_ITERS=15000
 declare -A ITERS
 ITERS["go_emotions_single_label|offset1-model-mse-lr"]=15000
 ITERS["go_emotions_single_label|offset1-model-v4-lr"]=20000
+ITERS["go_emotions_6labels|offset1-model-mse-lr"]=15000
+ITERS["go_emotions_6labels|offset1-model-v4-lr"]=20000
 
 # --- W&B プロジェクト名 ---
 declare -A WANDB_PROJECTS
 WANDB_PROJECTS["go_emotions_single_label|offset1-model-mse-lr"]="CEBRA_NLP_Experiment_goemo_single_embedeuc"
 WANDB_PROJECTS["go_emotions_single_label|offset1-model-v4-lr"]="CEBRA_NLP_Experiment_goemo_single_cos"
+WANDB_PROJECTS["go_emotions_6labels|offset1-model-mse-lr"]="CEBRA_NLP_Experiment_goemo_6labels_euc"
+WANDB_PROJECTS["go_emotions_6labels|offset1-model-v4-lr"]="CEBRA_NLP_Experiment_goemo_6labels_cos"
 DEFAULT_WANDB_PROJECT="CEBRA_NLP_Experiment_Default"
 
 # ====== 実行環境 ======
 GPU_LIST="${GPU_LIST:-0,1}"
-NPROC_PER_NODE="${NPROC_PER_NODE:-2}"
+IFS=',' read -r -a GPU_IDS <<< "$GPU_LIST"
+if [[ ${#GPU_IDS[@]} -eq 0 ]]; then
+  echo "[ERROR] GPU_LIST must contain at least one GPU id." >&2
+  exit 1
+fi
+NPROC_PER_NODE="${NPROC_PER_NODE:-1}"
 
 export TORCH_DISTRIBUTED_DEBUG="${TORCH_DISTRIBUTED_DEBUG:-DETAIL}"
 export NCCL_DEBUG="${NCCL_DEBUG:-INFO}"
@@ -54,6 +75,9 @@ echo "run_id,dataset,model,embedding,dim,iterations,wandb_project,exit_code,star
 trap 'echo "SIGINT: killing children..."; pkill -P $$; exit 130' INT
 
 # ====== ヘルパ ======
+declare -A GPU_ACTIVE_PIDS=()
+AVAILABLE_GPU=""
+
 get_iters() {
   local dataset="$1" model="$2"
   local key="${dataset}|${model}"
@@ -85,13 +109,32 @@ pick_free_port() {
   echo 29513
 }
 
-run_one () {
-  local dataset="$1" model="$2" emb="$3" dim="$4" iters="$5" wandb_project="$6"
-  local runid="${dataset}_${model}_${emb}_d${dim}"
-  local start_ts end_ts rc=0 retries=0
-  local errfile="/tmp/torchelastic_errors_${runid}.txt"
+acquire_gpu() {
+  while true; do
+    for gpu in "${GPU_IDS[@]}"; do
+      local pid="${GPU_ACTIVE_PIDS[$gpu]-}"
+      if [[ -z "$pid" ]]; then
+        AVAILABLE_GPU="$gpu"
+        return 0
+      fi
+      if ! kill -0 "$pid" 2>/dev/null; then
+        wait "$pid" 2>/dev/null || true
+        unset 'GPU_ACTIVE_PIDS[$gpu]'
+        AVAILABLE_GPU="$gpu"
+        return 0
+      fi
+    done
+    sleep 1
+  done
+}
 
-  echo "[RUN] $runid ($wandb_project)"
+run_one () {
+  local dataset="$1" model="$2" emb="$3" dim="$4" iters="$5" wandb_project="$6" gpu_id="$7"
+  local runid="${dataset}_${model}_${emb}_d${dim}_g${gpu_id}"
+  local start_ts end_ts rc=0 retries=0
+  local errfile="/tmp/torchelastic_errors_${dataset}_${model}_${emb}_d${dim}.txt"
+
+  echo "[RUN] $runid ($wandb_project, GPU $gpu_id)"
   start_ts=$(date +%Y-%m-%dT%H:%M:%S)
 
   for attempt in 1 2 3; do
@@ -99,7 +142,7 @@ run_one () {
     local mport; mport="$(pick_free_port)"
 
     TORCHELASTIC_ERROR_FILE="$errfile" \
-    CUDA_VISIBLE_DEVICES="$GPU_LIST" \
+    CUDA_VISIBLE_DEVICES="$gpu_id" \
     timeout 7h \
     torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" --master_port="$mport" \
       main.py \
@@ -131,15 +174,27 @@ run_one () {
 }
 
 # ====== 実行ループ ======
+declare -a ALL_PIDS=()
 for dataset in "${DATASETS[@]}"; do
   for model in "${MODELS[@]}"; do
     iters="$(get_iters "$dataset" "$model")"
     wandb_project="$(get_wandb_project "$dataset" "$model")"
     read -r -a dims <<<"$(get_dims_for_pair "$dataset" "$model")"
-    for dim in "${dims[@]}"; do
-      run_one "$dataset" "$model" "$EMB" "$dim" "$iters" "$wandb_project"
+    for emb in "${EMBEDDINGS[@]}"; do
+      for dim in "${dims[@]}"; do
+        acquire_gpu
+        gpu_id="$AVAILABLE_GPU"
+        run_one "$dataset" "$model" "$emb" "$dim" "$iters" "$wandb_project" "$gpu_id" &
+        pid=$!
+        GPU_ACTIVE_PIDS["$gpu_id"]=$pid
+        ALL_PIDS+=("$pid")
+      done
     done
   done
+done
+
+for pid in "${ALL_PIDS[@]}"; do
+  wait "$pid" || true
 done
 
 echo "All done. Summary -> $SUMMARY"
