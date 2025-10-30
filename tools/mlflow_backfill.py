@@ -8,6 +8,7 @@ import os
 import time
 import logging
 import traceback
+import numbers
 from pathlib import Path
 from typing import Any, Dict, Iterable, Optional
 from functools import lru_cache
@@ -20,6 +21,12 @@ ROOT = Path(__file__).resolve().parents[1]
 RESULTS_ROOT = ROOT / "results"
 WANDB_ROOT = ROOT / "wandb"
 DEFAULT_HOST_MINIO_ENDPOINT = "http://127.0.0.1:17243"
+WANDB_SUMMARY_METRICS = (
+    "loss",
+    "knn_accuracy",
+    "consistency_score_valid",
+    "consistency_score_train",
+)
 
 # ログ設定
 logging.basicConfig(
@@ -221,6 +228,25 @@ def extract_wandb_run_name(run_id: str) -> Optional[str]:
         return config.get("wandb", {}).get("value", {}).get("run_name")
     except Exception:
         return None
+
+
+@lru_cache(maxsize=None)
+def load_wandb_summary(run_id: str) -> Dict[str, Any]:
+    """Return the W&B run summary values if available."""
+    run_dir = find_wandb_run_dir(run_id)
+    if run_dir is None:
+        return {}
+    summary_file = run_dir / "files" / "wandb-summary.json"
+    if not summary_file.exists():
+        return {}
+    try:
+        return json.loads(summary_file.read_text())
+    except json.JSONDecodeError as exc:
+        logger.warning(f"Could not parse W&B summary for {run_id}: {exc}")
+        return {}
+    except OSError as exc:
+        logger.warning(f"Could not read W&B summary for {run_id}: {exc}")
+        return {}
 
 
 def load_env_file(path: Path) -> Dict[str, str]:
@@ -566,6 +592,23 @@ def ingest_run(run_dir: Path, skip_artifacts: bool = False, skip_duplicates: boo
             mlflow.log_params(flatten_dict(cfg_dict["evaluation"], "evaluation"))
             mlflow.set_tag("dataset", dataset_name)
             logger.info("Parameters logged successfully")
+
+            # W&B summary metrics
+            if wandb_run_id:
+                summary = load_wandb_summary(wandb_run_id)
+                if summary:
+                    wandb_metrics_to_log = {}
+                    for metric_name in WANDB_SUMMARY_METRICS:
+                        value = summary.get(metric_name)
+                        if isinstance(value, numbers.Number):
+                            wandb_metrics_to_log[metric_name] = float(value)
+                    if wandb_metrics_to_log:
+                        mlflow.log_metrics(wandb_metrics_to_log)
+                        logger.info(f"Logged W&B summary metrics: {wandb_metrics_to_log}")
+                    else:
+                        logger.debug(f"No matching W&B summary metrics found for run {wandb_run_id}")
+                else:
+                    logger.debug(f"No W&B summary available for run {wandb_run_id}")
 
             # 分類レポートの処理
             cls_report = run_dir / "classification_report.json"

@@ -184,6 +184,12 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
 
         df[label_col] = df[label_col].apply(_collapse_go_emotions_label)
 
+    if dataset_cfg.label_column is not None and dataset_cfg.label_remap:
+        label_col = dataset_cfg.label_column
+        remap = dataset_cfg.label_remap
+        df = df[df[label_col].isin(remap.keys())].reset_index(drop=True)
+        df[label_col] = df[label_col].map(remap).astype(np.int64)
+
     if dataset_cfg.label_column is not None and not dataset_cfg.multi_label:
         valid_labels = set(dataset_cfg.label_map.keys())
         df = df[df[dataset_cfg.label_column].isin(valid_labels)].reset_index(drop=True)

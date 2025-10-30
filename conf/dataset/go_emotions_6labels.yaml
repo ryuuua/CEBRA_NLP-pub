@@ -1,0 +1,35 @@
+# @package dataset
+
+name: go_emotions_6labels
+source: hf
+hf_path: "go_emotions"
+text_column: "text"
+label_column: "labels"
+drop_multi_label_samples: true
+shuffle: false
+
+label_map:
+  0: "anger"
+  1: "fear"
+  2: "joy"
+  3: "love"
+  4: "sadness"
+  5: "surprise"
+
+label_remap:
+  2: 0
+  14: 1
+  17: 2
+  18: 3
+  25: 4
+  26: 5
+
+visualization:
+  emotion_order: ['anger', 'fear', 'joy', 'love', 'sadness', 'surprise']
+  emotion_colors:
+    anger: "#d62728"
+    fear: "#a55194"
+    joy: "#e7cb94"
+    love: "#ff69b4"
+    sadness: "#3182bd"
+    surprise: "#fdae6b"

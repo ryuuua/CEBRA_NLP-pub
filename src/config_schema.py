@@ -14,6 +14,7 @@ class DatasetConfig:
     text_column: str
     label_map: Dict[int, str]
     visualization: VisualizationConfig
+    label_remap: Dict[int, int] = field(default_factory=dict)
 
     label_column: Optional[str] = None
     # When working with multi-label data, either specify multiple
