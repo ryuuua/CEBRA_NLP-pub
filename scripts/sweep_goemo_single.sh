@@ -47,7 +47,8 @@ if [[ ${#GPU_IDS[@]} -eq 0 ]]; then
   echo "[ERROR] GPU_LIST must contain at least one GPU id." >&2
   exit 1
 fi
-NPROC_PER_NODE="${NPROC_PER_NODE:-1}"
+DEFAULT_NPROC=${#GPU_IDS[@]}
+NPROC_PER_NODE="${NPROC_PER_NODE:-$DEFAULT_NPROC}"
 
 export TORCH_DISTRIBUTED_DEBUG="${TORCH_DISTRIBUTED_DEBUG:-DETAIL}"
 export NCCL_DEBUG="${NCCL_DEBUG:-INFO}"
@@ -75,8 +76,6 @@ echo "run_id,dataset,model,embedding,dim,iterations,wandb_project,exit_code,star
 trap 'echo "SIGINT: killing children..."; pkill -P $$; exit 130' INT
 
 # ====== ヘルパ ======
-declare -A GPU_ACTIVE_PIDS=()
-AVAILABLE_GPU=""
 
 get_iters() {
   local dataset="$1" model="$2"
@@ -109,32 +108,13 @@ pick_free_port() {
   echo 29513
 }
 
-acquire_gpu() {
-  while true; do
-    for gpu in "${GPU_IDS[@]}"; do
-      local pid="${GPU_ACTIVE_PIDS[$gpu]-}"
-      if [[ -z "$pid" ]]; then
-        AVAILABLE_GPU="$gpu"
-        return 0
-      fi
-      if ! kill -0 "$pid" 2>/dev/null; then
-        wait "$pid" 2>/dev/null || true
-        unset 'GPU_ACTIVE_PIDS[$gpu]'
-        AVAILABLE_GPU="$gpu"
-        return 0
-      fi
-    done
-    sleep 1
-  done
-}
-
 run_one () {
-  local dataset="$1" model="$2" emb="$3" dim="$4" iters="$5" wandb_project="$6" gpu_id="$7"
-  local runid="${dataset}_${model}_${emb}_d${dim}_g${gpu_id}"
+  local dataset="$1" model="$2" emb="$3" dim="$4" iters="$5" wandb_project="$6"
+  local runid="${dataset}_${model}_${emb}_d${dim}"
   local start_ts end_ts rc=0 retries=0
   local errfile="/tmp/torchelastic_errors_${dataset}_${model}_${emb}_d${dim}.txt"
 
-  echo "[RUN] $runid ($wandb_project, GPU $gpu_id)"
+  echo "[RUN] $runid ($wandb_project)"
   start_ts=$(date +%Y-%m-%dT%H:%M:%S)
 
   for attempt in 1 2 3; do
@@ -142,7 +122,7 @@ run_one () {
     local mport; mport="$(pick_free_port)"
 
     TORCHELASTIC_ERROR_FILE="$errfile" \
-    CUDA_VISIBLE_DEVICES="$gpu_id" \
+    CUDA_VISIBLE_DEVICES="$GPU_LIST" \
     timeout 7h \
     torchrun --standalone --nproc_per_node="$NPROC_PER_NODE" --master_port="$mport" \
       main.py \
@@ -174,7 +154,6 @@ run_one () {
 }
 
 # ====== 実行ループ ======
-declare -a ALL_PIDS=()
 for dataset in "${DATASETS[@]}"; do
   for model in "${MODELS[@]}"; do
     iters="$(get_iters "$dataset" "$model")"
@@ -182,19 +161,10 @@ for dataset in "${DATASETS[@]}"; do
     read -r -a dims <<<"$(get_dims_for_pair "$dataset" "$model")"
     for emb in "${EMBEDDINGS[@]}"; do
       for dim in "${dims[@]}"; do
-        acquire_gpu
-        gpu_id="$AVAILABLE_GPU"
-        run_one "$dataset" "$model" "$emb" "$dim" "$iters" "$wandb_project" "$gpu_id" &
-        pid=$!
-        GPU_ACTIVE_PIDS["$gpu_id"]=$pid
-        ALL_PIDS+=("$pid")
+        run_one "$dataset" "$model" "$emb" "$dim" "$iters" "$wandb_project"
       done
     done
   done
-done
-
-for pid in "${ALL_PIDS[@]}"; do
-  wait "$pid" || true
 done
 
 echo "All done. Summary -> $SUMMARY"

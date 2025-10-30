@@ -84,7 +84,7 @@ def _gather_chunks(payload: Dict[str, Any], world_size: int, rank: int) -> List[
     return []
 
 
-@hydra.main(config_path="conf", config_name="config", version_base="1.2")
+@hydra.main(config_path="../conf", config_name="config", version_base="1.2")
 def cache_embeddings(cfg: AppConfig) -> None:
     default_cfg = OmegaConf.structured(AppConfig)
     cfg = OmegaConf.merge(default_cfg, cfg)

@@ -9,11 +9,11 @@ drop_multi_label_samples: true
 shuffle: false
 
 label_map:
-  0: "anger""sadness"
-  1: "fear""joy"
-  2: "joy""love"
-  3: "love""anger"
-  4: "sadness""fear"
+  0: "anger"
+  1: "fear"
+  2: "joy"
+  3: "love"
+  4: "sadness"
   5: "surprise"
 
 label_remap:
