@@ -11,6 +11,11 @@ if [[ ${#GPU_IDS[@]} -eq 0 ]]; then
 fi
 NPROC=${#GPU_IDS[@]}
 
+# Ensure the project root is importable (needed when running under torchrun)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH:-}"
+
 EMBEDDINGS=(
   bert
   roberta
