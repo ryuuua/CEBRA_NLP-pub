@@ -85,7 +85,9 @@ def main(cfg: AppConfig) -> None:
 
     apply_reproducibility(cfg)
 
-    if torch.cuda.is_available():
+    if torch.backends.mps.is_available():
+        cfg.device = "mps"
+    elif torch.cuda.is_available():
         cfg.device = "cuda"
     else:
         cfg.device = "cpu"
