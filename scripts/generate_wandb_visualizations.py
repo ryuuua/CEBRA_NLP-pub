@@ -245,13 +245,22 @@ def _generate_visualizations(run_dir: Path, run_id: str) -> None:
 
 
 def _drive(run_ids: Iterable[str], results_root: Path) -> None:
+    scheduled: List[Tuple[str, Path]] = []
     for run_id in run_ids:
         matches = _find_run_dirs(results_root, run_id)
         if not matches:
             print(f"[WARN] No results directory found for run ID {run_id}")
             continue
-        for run_dir in matches:
-            _generate_visualizations(run_dir, run_id)
+        scheduled.extend((run_id, run_dir) for run_dir in matches)
+
+    if not scheduled:
+        print("[INFO] No matching runs found; nothing to visualize.")
+        return
+
+    total = len(scheduled)
+    for idx, (run_id, run_dir) in enumerate(scheduled, start=1):
+        print(f"[PROGRESS] ({idx}/{total})")
+        _generate_visualizations(run_dir, run_id)
 
 
 def main() -> None:
