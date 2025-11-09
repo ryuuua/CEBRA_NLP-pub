@@ -187,6 +187,25 @@ def _generate_visualizations(run_dir: Path, run_id: str) -> None:
     cfg = _load_cfg(run_dir)
     apply_reproducibility(cfg)
 
+    viz_dir = run_dir / "visualizations"
+    conditional_desc = (
+        "discrete labels" if cfg.cebra.conditional == "discrete" else "continuous labels"
+    )
+    interactive_path = viz_dir / f"cebra_interactive_{conditional_desc.replace(' ', '_')}.html"
+
+    # Skip expensive recomputation if we already produced the expected artifacts.
+    if interactive_path.exists():
+        has_required_outputs = True
+        if cfg.cebra.conditional == "discrete":
+            expected_static = [
+                viz_dir / "static_PCA_plot.png",
+                viz_dir / "static_UMAP_plot.png",
+            ]
+            has_required_outputs = all(path.exists() for path in expected_static)
+        if has_required_outputs:
+            print(f"[INFO] Visualizations already exist at {viz_dir}; skipping.")
+            return
+
     texts, conditional_data, _time_indices, ids = load_and_prepare_dataset(cfg)
 
     # Use stored embeddings when present; otherwise rebuild from scratch.
@@ -200,13 +219,8 @@ def _generate_visualizations(run_dir: Path, run_id: str) -> None:
         return
     labels, palette, order = _prepare_labels(cfg, conditional_data)
 
-    viz_dir = run_dir / "visualizations"
     viz_dir.mkdir(parents=True, exist_ok=True)
 
-    conditional_desc = (
-        "discrete labels" if cfg.cebra.conditional == "discrete" else "continuous labels"
-    )
-    interactive_path = viz_dir / f"cebra_interactive_{conditional_desc.replace(' ', '_')}.html"
     save_interactive_plot(
         embeddings=cebra_embeddings,
         text_labels=labels,
