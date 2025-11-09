@@ -11,8 +11,9 @@ from __future__ import annotations
 
 import argparse
 import json
+from itertools import combinations
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple
+from typing import Iterable, List, Tuple
 
 import numpy as np
 from cebra.integrations.sklearn.metrics import consistency_score
@@ -44,6 +45,31 @@ def _load_embeddings(run_dir: Path) -> np.ndarray:
     if not emb_path.exists():
         raise FileNotFoundError(f"{emb_path} is missing. Run must save embeddings (cebra.save_embeddings=true).")
     return np.load(emb_path)
+
+
+def _orthogonal_procrustes_metrics(a: np.ndarray, b: np.ndarray) -> Tuple[float, float]:
+    """Return (RSS, normalized Procrustes distance) after optimal rotation alignment."""
+    if a.shape != b.shape:
+        raise ValueError(f"shape mismatch {a.shape} != {b.shape}; cannot run Procrustes.")
+    if a.ndim != 2:
+        raise ValueError("Expected 2D embeddings (n_samples, dim).")
+
+    a_center = a - a.mean(axis=0, keepdims=True)
+    b_center = b - b.mean(axis=0, keepdims=True)
+
+    cov = b_center.T @ a_center
+    U, _, Vt = np.linalg.svd(cov, full_matrices=False)
+    R = U @ Vt
+    if np.linalg.det(R) < 0:
+        Vt[-1, :] *= -1.0
+        R = U @ Vt
+
+    aligned = b_center @ R
+    residual = a_center - aligned
+    rss = float(np.sum(residual ** 2))
+    norm = float(np.linalg.norm(a_center))
+    distance = float(np.sqrt(rss) / norm) if norm > 0 else float("nan")
+    return rss, distance
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -113,12 +139,27 @@ def main() -> None:
 
     scores, pairs, ids_runs = consistency_score(**kwargs)  # type: ignore[arg-type]
 
+    procrustes_rows: List[Tuple[str, str, float, float]] = []
+    for idx_a, idx_b in combinations(range(len(embeddings)), 2):
+        label_a, label_b = labels[idx_a], labels[idx_b]
+        try:
+            rss, distance = _orthogonal_procrustes_metrics(embeddings[idx_a], embeddings[idx_b])
+        except ValueError as exc:
+            print(f"[WARN] Skipping Procrustes metrics for {label_a} ↔ {label_b}: {exc}")
+            continue
+        procrustes_rows.append((label_a, label_b, rss, distance))
+
     print("\nPairwise consistency scores:")
     for pair, score in zip(pairs, scores):
         print(f"  {pair[0]} ↔ {pair[1]} : {float(score):.6f}")
 
     mean_score = float(np.mean(scores)) if len(scores) else float("nan")
     print(f"\nMean consistency score: {mean_score:.6f}")
+
+    if procrustes_rows:
+        print("\nOrthogonal Procrustes diagnostics (centered embeddings):")
+        for name_a, name_b, rss, distance in procrustes_rows:
+            print(f"  {name_a} ↔ {name_b} : RSS={rss:.6f}, ProcrustesDist={distance:.6f}")
 
     if args.json:
         payload = {
@@ -127,6 +168,15 @@ def main() -> None:
             "pairs": [list(pair) for pair in pairs],
             "ids_runs": ids_runs.tolist(),
         }
+        if procrustes_rows:
+            payload["procrustes_metrics"] = [
+                {
+                    "pair": [name_a, name_b],
+                    "rss": rss,
+                    "procrustes_distance": distance,
+                }
+                for name_a, name_b, rss, distance in procrustes_rows
+            ]
         args.json.parent.mkdir(parents=True, exist_ok=True)
         args.json.write_text(json.dumps(payload, indent=2))
         print(f"[INFO] Saved results to {args.json}")
@@ -134,4 +184,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
