@@ -108,6 +108,7 @@ class PCAAnalysisConfig:
     max_components: Optional[int] = None
     plot_sample_limit: Optional[int] = None
     min_components_for_plots: int = 3
+    export_dir: Optional[str] = None
 
 @dataclass
 class PathsConfig:

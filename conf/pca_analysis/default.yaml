@@ -3,3 +3,4 @@ component_variance_floor: 0.001    # stop reporting components once individual c
 max_components: null               # optionally cap PCA dimensionality
 plot_sample_limit: null            # optionally subsample points before plotting (e.g., 5000)
 min_components_for_plots: 3        # ensure we have enough dims for 3D plot when possible
+export_dir: null                   # set to write PCA artifacts to a fixed directory outside Hydra runs

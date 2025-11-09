@@ -2,6 +2,7 @@ import hydra
 import numpy as np
 import pandas as pd
 from hydra.core.hydra_config import HydraConfig
+from hydra.utils import get_original_cwd
 from omegaconf import OmegaConf
 from pathlib import Path
 from sklearn.decomposition import PCA
@@ -95,6 +96,16 @@ def _maybe_subsample(
     return subset_embeddings, subset_labels
 
 
+def _resolve_export_dir(run_dir: Path, cfg: AppConfig) -> Path:
+    custom_dir = getattr(cfg.pca_analysis, "export_dir", None)
+    if custom_dir:
+        target = Path(custom_dir)
+        if not target.is_absolute():
+            target = Path(get_original_cwd()) / target
+        return target
+    return run_dir / "pca_analysis"
+
+
 @hydra.main(config_path="conf", config_name="config", version_base="1.2")
 def run(cfg: AppConfig) -> None:
     default_cfg = OmegaConf.structured(AppConfig)
@@ -105,8 +116,8 @@ def run(cfg: AppConfig) -> None:
 
     output_dir = Path(HydraConfig.get().run.dir)
     output_dir.mkdir(parents=True, exist_ok=True)
-    viz_dir = output_dir / "pca_analysis"
-    viz_dir.mkdir(parents=True, exist_ok=True)
+    export_dir = _resolve_export_dir(output_dir, cfg)
+    export_dir.mkdir(parents=True, exist_ok=True)
 
     print("\n--- Step 1: Loading dataset ---")
     texts, conditional_data, _time_indices, ids = load_and_prepare_dataset(cfg)
@@ -132,9 +143,9 @@ def run(cfg: AppConfig) -> None:
         f"(target residual variance ≤ {residual_threshold:.2f}%)."
     )
 
-    scores_path = viz_dir / "pca_scores.npy"
+    scores_path = export_dir / "pca_scores.npy"
     np.save(scores_path, pca_scores)
-    report_path = viz_dir / "explained_variance.csv"
+    report_path = export_dir / "explained_variance.csv"
     variance_report.to_csv(report_path, index=False)
     print(f"Saved PCA scores to {scores_path}")
     print(f"Saved explained variance report to {report_path}")
@@ -146,8 +157,8 @@ def run(cfg: AppConfig) -> None:
     )
 
     title_base = f"{cfg.dataset.name} · Embedding PCA"
-    interactive_2d = viz_dir / "pca_embeddings_2d.html"
-    interactive_3d = viz_dir / "pca_embeddings_3d.html"
+    interactive_2d = export_dir / "pca_embeddings_2d.html"
+    interactive_3d = export_dir / "pca_embeddings_3d.html"
 
     if plot_embeddings.shape[1] >= 2:
         save_interactive_plot(
