@@ -13,6 +13,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.config_schema import AppConfig
 from src.data import load_and_prepare_dataset
+from src.plotting import prepare_plot_labels
 from src.results import save_interactive_plot, save_static_2d_plots
 from src.utils import (
     apply_reproducibility,
@@ -24,27 +25,13 @@ from src.embeddings import (
     get_embeddings,
     get_last_hidden_state_cache,
     clear_last_hidden_state_cache,
+    resolve_layer_index,
 )
 from src.cebra_trainer import (
     load_cebra_model,
     transform_cebra,
     normalize_model_architecture,
 )
-
-
-def resolve_layer_index(layer_count: int, requested: Optional[int]) -> int:
-    """Replicate main.resolve_layer_index without importing Hydra entrypoint."""
-    if layer_count <= 0:
-        raise ValueError("Layer cache is empty; cannot select a hidden state layer.")
-    index = layer_count - 1 if requested is None else requested
-    if index < 0:
-        index += layer_count
-    if index < 0 or index >= layer_count:
-        raise ValueError(
-            f"Layer index {requested} is out of bounds for cached tensor with "
-            f"{layer_count} layers."
-        )
-    return index
 
 
 def _load_cfg(run_dir: Path) -> AppConfig:
@@ -147,41 +134,6 @@ def _load_cebra_embeddings(
     return transform_cebra(model, base_embeddings, cfg.device)
 
 
-def _prepare_labels(
-    cfg: AppConfig, conditional_data: np.ndarray
-) -> Tuple[List, Optional[dict], List]:
-    """Return text labels plus palette/order for plotting."""
-    if cfg.cebra.conditional == "discrete":
-        data = np.asarray(conditional_data).reshape(-1)
-        unique = set(np.unique(data).tolist())
-        if unique == {-1, 1}:
-            data = np.where(data == -1, 0, 1)
-        label_map = {int(k): v for k, v in cfg.dataset.label_map.items()}
-        labels = [label_map[int(v)] for v in data]
-
-        vis_cfg = getattr(cfg.dataset, "visualization", None)
-        palette = (
-            OmegaConf.to_container(vis_cfg.emotion_colors, resolve=True)
-            if vis_cfg is not None and getattr(vis_cfg, "emotion_colors", None)
-            else None
-        )
-        order = (
-            list(
-                OmegaConf.to_container(vis_cfg.emotion_order, resolve=True)
-            )
-            if vis_cfg is not None and getattr(vis_cfg, "emotion_order", None)
-            else sorted({label_map[int(v)] for v in data})
-        )
-        return labels, palette, order
-
-    values = np.asarray(conditional_data)
-    if values.ndim == 2 and values.shape[1] >= 1:
-        labels = values[:, 0].tolist()
-    else:
-        labels = values.reshape(-1).tolist()
-    return labels, None, []
-
-
 def _generate_visualizations(run_dir: Path, run_id: str) -> None:
     print(f"\nProcessing run {run_id} at {run_dir}")
     cfg = _load_cfg(run_dir)
@@ -217,7 +169,7 @@ def _generate_visualizations(run_dir: Path, run_id: str) -> None:
     cebra_embeddings = _load_cebra_embeddings(run_dir, cfg, base_embeddings)
     if cebra_embeddings is None:
         return
-    labels, palette, order = _prepare_labels(cfg, conditional_data)
+    labels, palette, order = prepare_plot_labels(cfg, conditional_data)
 
     viz_dir.mkdir(parents=True, exist_ok=True)
 

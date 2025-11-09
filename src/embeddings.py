@@ -3,6 +3,11 @@ import torch
 from tqdm import tqdm
 
 from src.config_schema import AppConfig
+from src.utils import (
+    get_embedding_cache_path,
+    load_text_embedding,
+    save_text_embedding,
+)
 
 from typing import TYPE_CHECKING, Optional, Sequence, List
 
@@ -43,6 +48,31 @@ def _select_layer(
             f"which exposes {total_layers} hidden states."
         )
     return hidden_states[layer_index]
+
+
+def resolve_layer_index(layer_count: int, requested: Optional[int]) -> int:
+    """
+    Resolve the requested hidden state layer index into a non-negative integer.
+
+    Parameters
+    ----------
+    layer_count : int
+        Total number of layers available in the cached tensor.
+    requested : Optional[int]
+        The layer index specified in the configuration (can be negative or None).
+        When None, the final hidden state is selected.
+    """
+    if layer_count <= 0:
+        raise ValueError("Layer cache is empty; cannot select a hidden state layer.")
+    index = layer_count - 1 if requested is None else requested
+    if index < 0:
+        index += layer_count
+    if index < 0 or index >= layer_count:
+        raise ValueError(
+            f"Layer index {requested} is out of bounds for cached tensor with "
+            f"{layer_count} layers."
+        )
+    return index
 
 
 def get_hf_transformer_embeddings(
@@ -228,3 +258,70 @@ def get_embeddings(texts: list, cfg: AppConfig) -> np.ndarray:
         return get_word2vec_embeddings(texts, emb_cfg, cfg)
     else:
         raise ValueError(f"Unknown embedding type: {emb_cfg.type}")
+
+
+def _resolve_shuffle_seed(cfg: AppConfig) -> Optional[int]:
+    dataset_seed = getattr(cfg.dataset, "shuffle_seed", None)
+    if dataset_seed is not None:
+        return dataset_seed
+    eval_cfg = getattr(cfg, "evaluation", None)
+    if eval_cfg is not None:
+        return getattr(eval_cfg, "random_state", None)
+    return None
+
+
+def load_or_generate_embeddings(
+    cfg: AppConfig, texts: Sequence[str], ids: Sequence
+) -> np.ndarray:
+    """
+    Load cached embeddings when available; otherwise compute and cache them.
+    """
+    embedding_cache_path = get_embedding_cache_path(cfg)
+    cache = load_text_embedding(embedding_cache_path)
+    resolved_seed = _resolve_shuffle_seed(cfg)
+    X_vectors: Optional[np.ndarray] = None
+
+    if cache is not None:
+        cached_ids, cached_embeddings, cached_seed, cached_layer_embeddings = cache
+        if cached_seed == resolved_seed:
+            id_to_index = {str(i): idx for idx, i in enumerate(cached_ids)}
+            try:
+                selection_indices = np.asarray(
+                    [id_to_index[str(i)] for i in ids], dtype=int
+                )
+                if (
+                    cfg.embedding.type == "hf_transformer"
+                    and cached_layer_embeddings is not None
+                ):
+                    target_layer = resolve_layer_index(
+                        cached_layer_embeddings.shape[1],
+                        getattr(cfg.embedding, "hidden_state_layer", None),
+                    )
+                    X_vectors = cached_layer_embeddings[
+                        selection_indices, target_layer, :
+                    ]
+                else:
+                    cached = np.asarray(cached_embeddings)
+                    X_vectors = cached[selection_indices]
+            except KeyError:
+                print("Cached embeddings are missing required ids. Recomputing...")
+                X_vectors = None
+            except ValueError as exc:
+                print(f"{exc} Recomputing embeddings...")
+                X_vectors = None
+        else:
+            print("Cached embeddings shuffle seed mismatch. Recomputing...")
+
+    if X_vectors is None:
+        X_vectors = get_embeddings(list(texts), cfg)
+        layer_cache = get_last_hidden_state_cache()
+        save_text_embedding(
+            ids,
+            X_vectors,
+            resolved_seed,
+            embedding_cache_path,
+            layer_embeddings=layer_cache,
+        )
+        clear_last_hidden_state_cache()
+
+    return X_vectors

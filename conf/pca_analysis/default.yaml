@@ -1,0 +1,5 @@
+residual_variance_threshold: 0.01  # stop once remaining unexplained variance drops below 1%
+component_variance_floor: 0.001    # stop reporting components once individual contribution < 0.1%
+max_components: null               # optionally cap PCA dimensionality
+plot_sample_limit: null            # optionally subsample points before plotting (e.g., 5000)
+min_components_for_plots: 3        # ensure we have enough dims for 3D plot when possible

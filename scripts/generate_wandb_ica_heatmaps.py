@@ -22,6 +22,7 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from scripts import generate_wandb_visualizations as viz_scripts  # noqa: E402
+from src.plotting import prepare_plot_labels  # noqa: E402
 from src.utils import apply_reproducibility  # noqa: E402
 
 
@@ -364,7 +365,7 @@ def _generate_ica_visualizations(
     if cebra_embeddings is None:
         return
 
-    labels, _palette, order = viz_scripts._prepare_labels(cfg, conditional_data)
+    labels, _palette, order = prepare_plot_labels(cfg, conditional_data)
     resolved_state = _determine_random_state(cfg, random_state)
     ica_embeddings, ica_model = _apply_ica(
         cebra_embeddings, n_components=components, random_state=resolved_state, max_iter=max_iter

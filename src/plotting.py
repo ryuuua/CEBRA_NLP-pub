@@ -3,7 +3,43 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
-from omegaconf import DictConfig
+from typing import List, Optional, Tuple
+from omegaconf import DictConfig, OmegaConf
+
+from src.config_schema import AppConfig
+
+
+def prepare_plot_labels(
+    cfg: AppConfig, conditional_data: np.ndarray
+) -> Tuple[List, Optional[dict], List]:
+    """Return text labels plus palette/order for plotting functions."""
+    if cfg.cebra.conditional == "discrete":
+        data = np.asarray(conditional_data).reshape(-1)
+        unique = set(np.unique(data).tolist())
+        if unique == {-1, 1}:
+            data = np.where(data == -1, 0, 1)
+        label_map = {int(k): v for k, v in cfg.dataset.label_map.items()}
+        labels = [label_map[int(v)] for v in data]
+
+        vis_cfg = getattr(cfg.dataset, "visualization", None)
+        palette = (
+            OmegaConf.to_container(vis_cfg.emotion_colors, resolve=True)
+            if vis_cfg is not None and getattr(vis_cfg, "emotion_colors", None)
+            else None
+        )
+        order = (
+            list(OmegaConf.to_container(vis_cfg.emotion_order, resolve=True))
+            if vis_cfg is not None and getattr(vis_cfg, "emotion_order", None)
+            else sorted({label_map[int(v)] for v in data})
+        )
+        return labels, palette, order
+
+    values = np.asarray(conditional_data)
+    if values.ndim == 2 and values.shape[1] >= 1:
+        labels = values[:, 0].tolist()
+    else:
+        labels = values.reshape(-1).tolist()
+    return labels, None, []
 
 def plot_embedding_distributions(
     embeddings: np.ndarray, labels: np.ndarray, cfg: DictConfig, output_dir: Path

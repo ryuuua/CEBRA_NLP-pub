@@ -11,16 +11,10 @@ from src.config_schema import AppConfig, EmbeddingConfig
 from hydra.core.hydra_config import HydraConfig
 from hydra.utils import get_original_cwd
 from src.data import load_and_prepare_dataset
-from src.utils import (
-    apply_reproducibility,
-    get_embedding_cache_path,
-    load_text_embedding,
-    save_text_embedding,
-)
+from src.utils import apply_reproducibility
 from src.embeddings import (
     get_embeddings,
-    get_last_hidden_state_cache,
-    clear_last_hidden_state_cache,
+    load_or_generate_embeddings,
 )
 from src.cebra_trainer import (
     train_cebra,
@@ -43,30 +37,6 @@ import torch.distributed as dist
 # .envファイルから環境変数を読み込む
 load_dotenv()
 
-
-def resolve_layer_index(layer_count: int, requested: Optional[int]) -> int:
-    """
-    Resolve the requested hidden state layer index into a non-negative integer.
-
-    Parameters
-    ----------
-    layer_count : int
-        Total number of layers available in the cached tensor.
-    requested : Optional[int]
-        The layer index specified in the configuration (can be negative or None).
-        When None, the final hidden state is selected.
-    """
-    if layer_count <= 0:
-        raise ValueError("Layer cache is empty; cannot select a hidden state layer.")
-    index = layer_count - 1 if requested is None else requested
-    if index < 0:
-        index += layer_count
-    if index < 0 or index >= layer_count:
-        raise ValueError(
-            f"Layer index {requested} is out of bounds for cached tensor with "
-            f"{layer_count} layers."
-        )
-    return index
 
 @hydra.main(config_path="conf", config_name="config", version_base="1.2")
 def main(cfg: AppConfig) -> None:
@@ -134,54 +104,7 @@ def main(cfg: AppConfig) -> None:
 
         # --- 2. Get Text Embeddings ---
         print("\n--- Step 2: Generating text embeddings ---")
-        embedding_cache_path = get_embedding_cache_path(cfg)
-
-        cache = load_text_embedding(embedding_cache_path)
-        seed = (
-            cfg.dataset.shuffle_seed
-            if getattr(cfg.dataset, "shuffle_seed", None) is not None
-            else (cfg.evaluation.random_state if hasattr(cfg, "evaluation") else None)
-        )
-        X_vectors = None
-        if cache is not None:
-            cached_ids, cached_embeddings, cached_seed, cached_layer_embeddings = cache
-            if cached_seed == seed:
-                id_to_index = {str(i): idx for idx, i in enumerate(cached_ids)}
-                try:
-                    if (
-                        cfg.embedding.type == "hf_transformer"
-                        and cached_layer_embeddings is not None
-                    ):
-                        target_layer = resolve_layer_index(
-                            cached_layer_embeddings.shape[1],
-                            getattr(cfg.embedding, "hidden_state_layer", None),
-                        )
-                        selection_indices = np.asarray(
-                            [id_to_index[str(i)] for i in ids], dtype=int
-                        )
-                        X_vectors = cached_layer_embeddings[
-                            selection_indices, target_layer, :
-                        ]
-                    else:
-                        X_vectors = np.stack(
-                            [cached_embeddings[id_to_index[str(i)]] for i in ids]
-                        )
-                except KeyError:
-                    print("Cached embeddings are missing required ids. Recomputing...")
-                    X_vectors = None
-                except ValueError as exc:
-                    print(f"{exc} Recomputing embeddings...")
-                    X_vectors = None
-            else:
-                print("Cached embeddings shuffle seed mismatch. Recomputing...")
-        if X_vectors is None:
-            X_vectors = get_embeddings(texts, cfg)
-            layer_cache = get_last_hidden_state_cache()
-            save_text_embedding(
-                ids, X_vectors, seed, embedding_cache_path, layer_embeddings=layer_cache
-            )
-            clear_last_hidden_state_cache()
-
+        X_vectors = load_or_generate_embeddings(cfg, texts, ids)
 
         # --- Data Splitting ---
         print("\n--- Step 3: Splitting data ---")

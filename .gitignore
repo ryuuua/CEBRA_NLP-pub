@@ -9,6 +9,7 @@
 !pyproject.toml
 !setup.cfg
 !setup.py
+!pca_embeddings.py
 
 # コード・設定・スクリプト・テストを許可
 !src/

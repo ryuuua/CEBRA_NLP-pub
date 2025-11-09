@@ -3,6 +3,7 @@ defaults:
   - paths: default
   - dataset: dair-ai
   - embedding: bert
+  - pca_analysis: default
   - cebra: offset1-model-lr
   - consistency_check: default
   - hpt: my_sweep

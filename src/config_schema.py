@@ -100,6 +100,15 @@ class ReproducibilityConfig:
     deterministic: bool = False
     cudnn_benchmark: bool = False
 
+
+@dataclass
+class PCAAnalysisConfig:
+    residual_variance_threshold: float = 0.01
+    component_variance_floor: float = 0.001
+    max_components: Optional[int] = None
+    plot_sample_limit: Optional[int] = None
+    min_components_for_plots: int = 3
+
 @dataclass
 class PathsConfig:
     embedding_cache_dir: str
@@ -135,4 +144,5 @@ class AppConfig:
     hpt: HyperParamTuningConfig
     ddp: DDPConfig
     reproducibility: ReproducibilityConfig 
+    pca_analysis: PCAAnalysisConfig
     device: str = "cpu"
