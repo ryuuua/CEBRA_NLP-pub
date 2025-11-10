@@ -234,6 +234,8 @@ def _generate_visualizations(
             log_to_wandb=False,
         )
 
+    return "generated"
+
 
 def _drive(run_ids: List[str], results_root: Path, *, force: bool = False) -> None:
     scheduled: List[Tuple[str, Path]] = []
