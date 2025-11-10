@@ -1,7 +1,7 @@
 import argparse
 import sys
 from pathlib import Path
-from typing import Iterable, List, Optional, Tuple
+from typing import Dict, Iterable, List, Literal, Optional, Set, Tuple
 
 import numpy as np
 import torch
@@ -61,6 +61,53 @@ def _find_run_dirs(results_root: Path, run_id: str) -> List[Path]:
         if marker.read_text().strip() == run_id:
             matches.append(marker.parent)
     return sorted(matches)
+
+
+def _collect_run_ids(
+    cli_ids: Iterable[str],
+    run_ids_file: Optional[Path],
+) -> List[str]:
+    """Combine CLI run IDs with an optional file (deduplicated, preserving order)."""
+
+    def _register(candidate: str) -> None:
+        normalized = candidate.strip()
+        if not normalized or normalized.startswith("#"):
+            return
+        if normalized in seen:
+            return
+        seen.add(normalized)
+        ordered.append(normalized)
+
+    seen: Set[str] = set()
+    ordered: List[str] = []
+
+    if run_ids_file is not None:
+        if not run_ids_file.exists():
+            raise FileNotFoundError(f"Run ID file not found: {run_ids_file}")
+        for line in run_ids_file.read_text().splitlines():
+            _register(line)
+
+    for run_id in cli_ids:
+        _register(run_id)
+
+    return ordered
+
+
+def _resolve_visualization_paths(
+    cfg: AppConfig, run_dir: Path
+) -> Tuple[Path, Path, List[Path], str]:
+    viz_dir = run_dir / "visualizations"
+    conditional_desc = (
+        "discrete labels" if cfg.cebra.conditional == "discrete" else "continuous labels"
+    )
+    interactive_path = viz_dir / f"cebra_interactive_{conditional_desc.replace(' ', '_')}.html"
+    expected_static: List[Path] = []
+    if cfg.cebra.conditional == "discrete":
+        expected_static = [
+            viz_dir / "static_PCA_plot.png",
+            viz_dir / "static_UMAP_plot.png",
+        ]
+    return viz_dir, interactive_path, expected_static, conditional_desc
 
 
 def _prepare_base_embeddings(cfg: AppConfig, ids: Iterable, texts: List[str]) -> np.ndarray:
@@ -134,29 +181,21 @@ def _load_cebra_embeddings(
     return transform_cebra(model, base_embeddings, cfg.device)
 
 
-def _generate_visualizations(run_dir: Path, run_id: str) -> None:
+def _generate_visualizations(
+    run_dir: Path, run_id: str, *, force: bool = False
+) -> Literal["generated", "skipped_existing", "missing_artifacts"]:
     print(f"\nProcessing run {run_id} at {run_dir}")
     cfg = _load_cfg(run_dir)
     apply_reproducibility(cfg)
 
-    viz_dir = run_dir / "visualizations"
-    conditional_desc = (
-        "discrete labels" if cfg.cebra.conditional == "discrete" else "continuous labels"
+    viz_dir, interactive_path, expected_static, conditional_desc = _resolve_visualization_paths(
+        cfg, run_dir
     )
-    interactive_path = viz_dir / f"cebra_interactive_{conditional_desc.replace(' ', '_')}.html"
 
     # Skip expensive recomputation if we already produced the expected artifacts.
-    if interactive_path.exists():
-        has_required_outputs = True
-        if cfg.cebra.conditional == "discrete":
-            expected_static = [
-                viz_dir / "static_PCA_plot.png",
-                viz_dir / "static_UMAP_plot.png",
-            ]
-            has_required_outputs = all(path.exists() for path in expected_static)
-        if has_required_outputs:
-            print(f"[INFO] Visualizations already exist at {viz_dir}; skipping.")
-            return
+    if not force and interactive_path.exists() and all(path.exists() for path in expected_static):
+        print(f"[INFO] Visualizations already exist at {viz_dir}; skipping.")
+        return "skipped_existing"
 
     texts, conditional_data, _time_indices, ids = load_and_prepare_dataset(cfg)
 
@@ -168,7 +207,7 @@ def _generate_visualizations(run_dir: Path, run_id: str) -> None:
 
     cebra_embeddings = _load_cebra_embeddings(run_dir, cfg, base_embeddings)
     if cebra_embeddings is None:
-        return
+        return "missing_artifacts"
     labels, palette, order = prepare_plot_labels(cfg, conditional_data)
 
     viz_dir.mkdir(parents=True, exist_ok=True)
@@ -196,23 +235,39 @@ def _generate_visualizations(run_dir: Path, run_id: str) -> None:
         )
 
 
-def _drive(run_ids: Iterable[str], results_root: Path) -> None:
+def _drive(run_ids: List[str], results_root: Path, *, force: bool = False) -> None:
     scheduled: List[Tuple[str, Path]] = []
+    missing = 0
     for run_id in run_ids:
         matches = _find_run_dirs(results_root, run_id)
         if not matches:
             print(f"[WARN] No results directory found for run ID {run_id}")
+            missing += 1
             continue
         scheduled.extend((run_id, run_dir) for run_dir in matches)
 
     if not scheduled:
         print("[INFO] No matching runs found; nothing to visualize.")
+        if missing:
+            print(
+                f"[SUMMARY] Requested {len(run_ids)} run ID(s); "
+                f"{missing} had no matching directories."
+            )
         return
 
     total = len(scheduled)
+    stats: Dict[str, int] = {"generated": 0, "skipped_existing": 0, "missing_artifacts": 0}
     for idx, (run_id, run_dir) in enumerate(scheduled, start=1):
-        print(f"[PROGRESS] ({idx}/{total})")
-        _generate_visualizations(run_dir, run_id)
+        print(f"[PROGRESS] ({idx}/{total}) run_id={run_id}")
+        status = _generate_visualizations(run_dir, run_id, force=force)
+        stats[status] += 1
+
+    summary = (
+        f"[SUMMARY] Requested {len(run_ids)} run ID(s) · matched {total} run folder(s) · "
+        f"{missing} missing · generated {stats['generated']} · "
+        f"skipped {stats['skipped_existing']} · missing artifacts {stats['missing_artifacts']}"
+    )
+    print(summary)
 
 
 def main() -> None:
@@ -221,7 +276,7 @@ def main() -> None:
     )
     parser.add_argument(
         "run_ids",
-        nargs="+",
+        nargs="*",
         help="One or more W&B run IDs (e.g. wwdjevwp).",
     )
     parser.add_argument(
@@ -230,9 +285,27 @@ def main() -> None:
         default=Path("results"),
         help="Root directory containing Hydra output folders.",
     )
+    parser.add_argument(
+        "--run-ids-file",
+        type=Path,
+        help="Optional text file containing run IDs (one per line).",
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Regenerate visualizations even if outputs already exist.",
+    )
     args = parser.parse_args()
 
-    _drive(args.run_ids, args.results_root.resolve())
+    try:
+        resolved_run_ids = _collect_run_ids(args.run_ids, args.run_ids_file)
+    except FileNotFoundError as exc:
+        parser.error(str(exc))
+
+    if not resolved_run_ids:
+        parser.error("No run IDs supplied. Provide CLI run IDs or --run-ids-file.")
+
+    _drive(resolved_run_ids, args.results_root.resolve(), force=args.force)
 
 
 if __name__ == "__main__":
