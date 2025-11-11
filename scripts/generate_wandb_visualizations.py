@@ -34,7 +34,38 @@ from src.cebra_trainer import (
 )
 
 
-def _load_cfg(run_dir: Path) -> AppConfig:
+def _resolve_device(requested: Optional[str]) -> str:
+    """Resolve a user-requested device string into a concrete torch device."""
+    if requested is None:
+        requested = "auto"
+    normalized = requested.strip().lower()
+    if normalized == "auto":
+        return "cuda" if torch.cuda.is_available() else "cpu"
+    if normalized == "cpu":
+        return "cpu"
+    if normalized in {"mps", "mps:0"}:
+        if not getattr(torch.backends, "mps", None) or not torch.backends.mps.is_available():
+            raise ValueError("MPS device requested but not available.")
+        return "mps"
+    if normalized.startswith("cuda"):
+        if not torch.cuda.is_available():
+            raise ValueError("CUDA device requested but no GPU is available.")
+        if normalized == "cuda":
+            return "cuda"
+        try:
+            _, idx_str = normalized.split(":", 1)
+            idx = int(idx_str)
+        except (ValueError, IndexError) as exc:
+            raise ValueError(f"Invalid CUDA device specification: '{requested}'.") from exc
+        if idx < 0 or idx >= torch.cuda.device_count():
+            raise ValueError(
+                f"CUDA device index {idx} is out of range. Available GPUs: {torch.cuda.device_count()}."
+            )
+        return f"cuda:{idx}"
+    raise ValueError(f"Unsupported device specification '{requested}'.")
+
+
+def _load_cfg(run_dir: Path, *, device_override: Optional[str] = None) -> AppConfig:
     """Hydra writes the resolved config under .hydra/config.yaml."""
     hydra_cfg_path = run_dir / ".hydra" / "config.yaml"
     if not hydra_cfg_path.exists():
@@ -50,7 +81,11 @@ def _load_cfg(run_dir: Path) -> AppConfig:
     cfg.cebra.model_architecture = normalize_model_architecture(
         getattr(cfg.cebra, "model_architecture", "offset0-model")
     )
-    cfg.device = "cuda" if torch.cuda.is_available() else "cpu"
+    cfg.device = (
+        _resolve_device(device_override)
+        if device_override is not None
+        else ("cuda" if torch.cuda.is_available() else "cpu")
+    )
 
     return cfg
 
@@ -158,6 +193,8 @@ def _load_cebra_embeddings(
     run_dir: Path,
     cfg: AppConfig,
     base_embeddings: Optional[np.ndarray],
+    *,
+    batch_size: int = 4096,
 ) -> Optional[np.ndarray]:
     embeddings_path = run_dir / "cebra_embeddings.npy"
     if embeddings_path.exists():
@@ -177,15 +214,63 @@ def _load_cebra_embeddings(
         )
         return None
 
+    if base_embeddings.shape[0] == 0:
+        output_dim = max(int(getattr(cfg.cebra, "output_dim", 0)), 0)
+        return np.empty((0, output_dim), dtype=np.float32)
+
     model = load_cebra_model(model_path, cfg, input_dimension=base_embeddings.shape[1])
+    device_str = str(cfg.device).lower()
+    if batch_size <= 0:
+        raise ValueError("`batch_size` must be a positive integer.")
+    if device_str.startswith(("cuda", "mps")):
+        return _transform_cebra_batched(model, base_embeddings, cfg.device, batch_size=batch_size)
     return transform_cebra(model, base_embeddings, cfg.device)
 
 
+def _transform_cebra_batched(
+    model: torch.nn.Module,
+    embeddings: np.ndarray,
+    device: str,
+    *,
+    batch_size: int,
+) -> np.ndarray:
+    """Run the CEBRA model in mini-batches on the requested device (GPU when available)."""
+    if embeddings.ndim != 2:
+        raise ValueError(f"CEBRA embeddings must be 2D, received shape {embeddings.shape}.")
+    total = embeddings.shape[0]
+    if total == 0:
+        return np.empty((0, 0), dtype=np.float32)
+
+    torch_device = torch.device(device)
+    was_training = model.training
+    model.to(torch_device)
+    model.eval()
+    outputs: List[torch.Tensor] = []
+    with torch.no_grad():
+        for start in range(0, total, batch_size):
+            end = min(start + batch_size, total)
+            batch_np = embeddings[start:end]
+            batch_tensor = torch.as_tensor(batch_np, dtype=torch.float32, device=torch_device)
+            out = model(batch_tensor)
+            if isinstance(out, tuple):
+                out = out[0]
+            outputs.append(out.detach().cpu())
+    if was_training:
+        model.train()
+    concatenated = torch.cat(outputs, dim=0)
+    return concatenated.numpy()
+
+
 def _generate_visualizations(
-    run_dir: Path, run_id: str, *, force: bool = False
+    run_dir: Path,
+    run_id: str,
+    *,
+    force: bool = False,
+    device_override: Optional[str] = None,
+    cebra_batch_size: int = 4096,
 ) -> Literal["generated", "skipped_existing", "missing_artifacts"]:
     print(f"\nProcessing run {run_id} at {run_dir}")
-    cfg = _load_cfg(run_dir)
+    cfg = _load_cfg(run_dir, device_override=device_override)
     apply_reproducibility(cfg)
 
     viz_dir, interactive_path, expected_static, conditional_desc = _resolve_visualization_paths(
@@ -205,7 +290,12 @@ def _generate_visualizations(
     if not embeddings_path.exists():
         base_embeddings = _prepare_base_embeddings(cfg, ids, texts)
 
-    cebra_embeddings = _load_cebra_embeddings(run_dir, cfg, base_embeddings)
+    cebra_embeddings = _load_cebra_embeddings(
+        run_dir,
+        cfg,
+        base_embeddings,
+        batch_size=cebra_batch_size,
+    )
     if cebra_embeddings is None:
         return "missing_artifacts"
     labels, palette, order = prepare_plot_labels(cfg, conditional_data)
@@ -237,7 +327,14 @@ def _generate_visualizations(
     return "generated"
 
 
-def _drive(run_ids: List[str], results_root: Path, *, force: bool = False) -> None:
+def _drive(
+    run_ids: List[str],
+    results_root: Path,
+    *,
+    force: bool = False,
+    device: Optional[str] = None,
+    cebra_batch_size: int,
+) -> None:
     scheduled: List[Tuple[str, Path]] = []
     missing = 0
     for run_id in run_ids:
@@ -261,7 +358,13 @@ def _drive(run_ids: List[str], results_root: Path, *, force: bool = False) -> No
     stats: Dict[str, int] = {"generated": 0, "skipped_existing": 0, "missing_artifacts": 0}
     for idx, (run_id, run_dir) in enumerate(scheduled, start=1):
         print(f"[PROGRESS] ({idx}/{total}) run_id={run_id}")
-        status = _generate_visualizations(run_dir, run_id, force=force)
+        status = _generate_visualizations(
+            run_dir,
+            run_id,
+            force=force,
+            device_override=device,
+            cebra_batch_size=cebra_batch_size,
+        )
         stats[status] += 1
 
     summary = (
@@ -297,6 +400,17 @@ def main() -> None:
         action="store_true",
         help="Regenerate visualizations even if outputs already exist.",
     )
+    parser.add_argument(
+        "--device",
+        default="auto",
+        help="Device to run embedding regeneration on (e.g. auto, cpu, cuda, cuda:1, mps).",
+    )
+    parser.add_argument(
+        "--cebra-batch-size",
+        type=int,
+        default=4096,
+        help="Mini-batch size for GPU inference when rebuilding CEBRA embeddings.",
+    )
     args = parser.parse_args()
 
     try:
@@ -307,7 +421,18 @@ def main() -> None:
     if not resolved_run_ids:
         parser.error("No run IDs supplied. Provide CLI run IDs or --run-ids-file.")
 
-    _drive(resolved_run_ids, args.results_root.resolve(), force=args.force)
+    try:
+        device = _resolve_device(args.device)
+    except ValueError as exc:
+        parser.error(str(exc))
+
+    _drive(
+        resolved_run_ids,
+        args.results_root.resolve(),
+        force=args.force,
+        device=device,
+        cebra_batch_size=args.cebra_batch_size,
+    )
 
 
 if __name__ == "__main__":
