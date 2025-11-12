@@ -9,10 +9,7 @@ from src.utils import (
     save_text_embedding,
 )
 
-from typing import TYPE_CHECKING, Optional, Sequence, List
-
-if TYPE_CHECKING:
-    from src.config_schema import AppConfig
+from typing import Optional, Sequence, List
 
 _LAST_LAYER_CACHE: Optional[np.ndarray] = None
 
@@ -106,27 +103,27 @@ def get_hf_transformer_embeddings(
     except (GatedRepoError, OSError) as exc:
         _raise_access_error(exc)
 
+    # Set pad_token if missing
     if getattr(tokenizer, "pad_token", None) is None:
-        fallback_token = None
         for attr in ("eos_token", "sep_token", "cls_token", "bos_token"):
-            token = getattr(tokenizer, attr, None)
-            if token is not None:
-                fallback_token = token
+            fallback_token = getattr(tokenizer, attr, None)
+            if fallback_token is not None:
+                tokenizer.pad_token = fallback_token
+                if getattr(tokenizer, "pad_token_id", None) is None and hasattr(
+                    tokenizer, "convert_tokens_to_ids"
+                ):
+                    pad_token_id = tokenizer.convert_tokens_to_ids(fallback_token)
+                    if pad_token_id is not None:
+                        tokenizer.pad_token_id = pad_token_id
                 break
-        if fallback_token is not None:
-            tokenizer.pad_token = fallback_token
-            if getattr(tokenizer, "pad_token_id", None) is None and hasattr(
-                tokenizer, "convert_tokens_to_ids"
-            ):
-                pad_token_id = tokenizer.convert_tokens_to_ids(fallback_token)
-                if pad_token_id is not None:
-                    tokenizer.pad_token_id = pad_token_id
+
     try:
         model = AutoModel.from_pretrained(
             model_name, trust_remote_code=trust_remote_code
         ).to(device)
     except (GatedRepoError, OSError) as exc:
         _raise_access_error(exc)
+
     embeddings = []
     layer_accumulator: Optional[List[List[np.ndarray]]] = None
     with torch.no_grad():
@@ -142,6 +139,8 @@ def get_hf_transformer_embeddings(
             outputs = model(**inputs, output_hidden_states=True)
             attention_mask = inputs["attention_mask"]
             hidden_states = outputs.hidden_states
+
+            # Select the appropriate hidden state layer
             if layer_index is None:
                 hidden_state = outputs.last_hidden_state
             else:
@@ -151,11 +150,14 @@ def get_hf_transformer_embeddings(
                         "one was requested."
                     )
                 hidden_state = _select_layer(hidden_states, layer_index, model_name)
+
             pooled_selected = _mean_pool(hidden_state, attention_mask).to(
                 dtype=torch.float32
             )
             batch_embeddings = pooled_selected.cpu().numpy()
             embeddings.append(batch_embeddings)
+
+            # Accumulate all layer hidden states for caching
             if hidden_states is not None:
                 if layer_accumulator is None:
                     layer_accumulator = [[] for _ in range(len(hidden_states))]
@@ -165,6 +167,7 @@ def get_hf_transformer_embeddings(
                     )
                     pooled = pooled_tensor.cpu().numpy()
                     layer_accumulator[idx].append(pooled)
+
     if layer_accumulator is not None:
         per_layer = [
             np.vstack(chunks).astype(np.float32, copy=False)
@@ -195,17 +198,21 @@ def get_word2vec_embeddings(texts, w2v_params, cfg: Optional[AppConfig] = None):
     # Simple tokenization
     tokenized_sentences = [text.lower().split() for text in texts]
 
-    reproducibility = getattr(cfg, "reproducibility", None) if cfg is not None else None
-    deterministic = bool(getattr(reproducibility, "deterministic", False))
+    # Resolve seed for reproducibility
     seed = None
-    if deterministic:
-        seed = getattr(reproducibility, "seed", None)
-        if seed is None and cfg is not None:
-            eval_cfg = getattr(cfg, "evaluation", None)
-            if eval_cfg is not None:
-                seed = getattr(eval_cfg, "random_state", None)
+    if cfg is not None:
+        reproducibility = getattr(cfg, "reproducibility", None)
+        if reproducibility is not None:
+            deterministic = bool(getattr(reproducibility, "deterministic", False))
+            if deterministic:
+                seed = getattr(reproducibility, "seed", None)
+                if seed is None:
+                    eval_cfg = getattr(cfg, "evaluation", None)
+                    if eval_cfg is not None:
+                        seed = getattr(eval_cfg, "random_state", None)
 
     workers = getattr(w2v_params, "workers", 4)
+    deterministic = seed is not None
     word2vec_kwargs = dict(
         sentences=tokenized_sentences,
         vector_size=w2v_params.vector_size,
@@ -214,7 +221,7 @@ def get_word2vec_embeddings(texts, w2v_params, cfg: Optional[AppConfig] = None):
         sg=w2v_params.sg,
         workers=1 if deterministic else workers,
     )
-    if deterministic and seed is not None:
+    if deterministic:
         word2vec_kwargs["seed"] = seed
 
     model = Word2Vec(**word2vec_kwargs)
@@ -225,7 +232,7 @@ def get_word2vec_embeddings(texts, w2v_params, cfg: Optional[AppConfig] = None):
     sentence_embeddings = []
     for tokens in tqdm(tokenized_sentences, desc="Averaging Word2Vec vectors"):
         word_vectors = [wv[word] for word in tokens if word in wv]
-        if len(word_vectors) > 0:
+        if word_vectors:
             sentence_embeddings.append(np.mean(word_vectors, axis=0))
         else:
             # For sentences with no words in vocab, use a zero vector
@@ -279,15 +286,17 @@ def load_or_generate_embeddings(
     embedding_cache_path = get_embedding_cache_path(cfg)
     cache = load_text_embedding(embedding_cache_path)
     resolved_seed = _resolve_shuffle_seed(cfg)
-    X_vectors: Optional[np.ndarray] = None
 
+    # Try to load from cache
     if cache is not None:
         cached_ids, cached_embeddings, cached_seed, cached_layer_embeddings = cache
         if cached_seed == resolved_seed:
-            id_to_index = {str(i): idx for idx, i in enumerate(cached_ids)}
+            # Convert ids to strings once for efficient lookup
+            str_ids = [str(i) for i in ids]
+            id_to_index = {str(cached_id): idx for idx, cached_id in enumerate(cached_ids)}
             try:
                 selection_indices = np.asarray(
-                    [id_to_index[str(i)] for i in ids], dtype=int
+                    [id_to_index[sid] for sid in str_ids], dtype=int
                 )
                 if (
                     cfg.embedding.type == "hf_transformer"
@@ -297,31 +306,30 @@ def load_or_generate_embeddings(
                         cached_layer_embeddings.shape[1],
                         getattr(cfg.embedding, "hidden_state_layer", None),
                     )
-                    X_vectors = cached_layer_embeddings[
+                    return cached_layer_embeddings[
                         selection_indices, target_layer, :
                     ]
                 else:
                     cached = np.asarray(cached_embeddings)
-                    X_vectors = cached[selection_indices]
-            except KeyError:
-                print("Cached embeddings are missing required ids. Recomputing...")
-                X_vectors = None
-            except ValueError as exc:
-                print(f"{exc} Recomputing embeddings...")
-                X_vectors = None
+                    return cached[selection_indices]
+            except (KeyError, ValueError) as exc:
+                if isinstance(exc, KeyError):
+                    print("Cached embeddings are missing required ids. Recomputing...")
+                else:
+                    print(f"{exc} Recomputing embeddings...")
         else:
             print("Cached embeddings shuffle seed mismatch. Recomputing...")
 
-    if X_vectors is None:
-        X_vectors = get_embeddings(list(texts), cfg)
-        layer_cache = get_last_hidden_state_cache()
-        save_text_embedding(
-            ids,
-            X_vectors,
-            resolved_seed,
-            embedding_cache_path,
-            layer_embeddings=layer_cache,
-        )
-        clear_last_hidden_state_cache()
+    # Generate new embeddings
+    X_vectors = get_embeddings(list(texts), cfg)
+    layer_cache = get_last_hidden_state_cache()
+    save_text_embedding(
+        ids,
+        X_vectors,
+        resolved_seed,
+        embedding_cache_path,
+        layer_embeddings=layer_cache,
+    )
+    clear_last_hidden_state_cache()
 
     return X_vectors

@@ -60,8 +60,6 @@ except (ImportError, ModuleNotFoundError, OSError):
     # rest of the pipeline can gracefully fall back to scikit-learn implementations.
     faiss = None  # type: ignore[assignment]
 
-# train_test_splitはこのファイルで使われていないため削除
-
 
 def clear_cuda_cache() -> None:
     """Clear the CUDA cache if running on a GPU."""
@@ -155,7 +153,6 @@ def _faiss_knn_search(
         )
 
     index = faiss.IndexFlatL2(train32.shape[1])  # type: ignore[attr-defined]
-    res = None
     if use_gpu:
         if not _FAISS_GPU_AVAILABLE:
             raise RuntimeError(
@@ -198,6 +195,71 @@ def _faiss_weighted_regression(
     return weighted_sum / weight_sum
 
 
+def _resolve_knn_backend(
+    backend: str,
+    use_gpu: bool | None,
+) -> tuple[str, bool]:
+    """Resolve k-NN backend selection logic. Returns (selected_backend, faiss_use_gpu)."""
+    backend_choice = (backend or "auto").lower()
+    prefer_gpu = torch.cuda.is_available() if use_gpu is None else bool(use_gpu)
+    faiss_use_gpu = False
+
+    if backend_choice == "auto":
+        use_cuml = prefer_gpu and _should_use_cuml()
+        if use_cuml:
+            return "cuml", False
+        faiss_available, faiss_use_gpu = _resolve_faiss_backend(
+            None if use_gpu is None else prefer_gpu,
+            strict=False,
+        )
+        return ("faiss" if faiss_available else "sklearn"), faiss_use_gpu
+    elif backend_choice == "cuml":
+        if _read_env_flag("CEBRA_DISABLE_CUML") is True:
+            raise RuntimeError("cuML backend is disabled via CEBRA_DISABLE_CUML.")
+        if not _CUML_AVAILABLE:
+            raise RuntimeError("cuML backend requested but cuML is not installed.")
+        if not torch.cuda.is_available():
+            raise RuntimeError("cuML backend requested but no CUDA device is available.")
+        if use_gpu is False:
+            raise RuntimeError("cuML backend requires GPU execution (use_gpu=True).")
+        return "cuml", False
+    elif backend_choice == "faiss":
+        faiss_available, faiss_use_gpu = _resolve_faiss_backend(
+            prefer_gpu,
+            strict=True,
+        )
+        if not faiss_available:
+            raise RuntimeError("FAISS backend requested but faiss is not installed.")
+        return "faiss", faiss_use_gpu
+    else:
+        return "sklearn", False
+
+
+def _resolve_umap_seed(cfg: Optional[AppConfig]) -> Optional[int]:
+    """Resolve UMAP random seed from configuration."""
+    if cfg is None:
+        return None
+    reproducibility = getattr(cfg, "reproducibility", None)
+    if reproducibility is None:
+        return None
+    deterministic = bool(getattr(reproducibility, "deterministic", False))
+    if not deterministic:
+        return None
+    seed = getattr(reproducibility, "seed", None)
+    if seed is not None:
+        return seed
+    eval_cfg = getattr(cfg, "evaluation", None)
+    if eval_cfg is not None:
+        return getattr(eval_cfg, "random_state", None)
+    return None
+
+
+def _compute_faiss_weights(distances: np.ndarray) -> np.ndarray:
+    """Compute inverse distance weights for FAISS k-NN, avoiding division by zero."""
+    distances = np.sqrt(np.maximum(np.asarray(distances, dtype=np.float64), 0.0))
+    return 1.0 / np.maximum(distances, 1e-12)
+
+
 def save_interactive_plot(
     embeddings, text_labels, output_dim, palette, title, output_path: Path
 ):
@@ -205,7 +267,7 @@ def save_interactive_plot(
     print(
         f"\nGenerating interactive visualization for {output_dim}-dimensional output..."
     )
-    if not (output_dim == 2 or output_dim == 3):
+    if output_dim not in (2, 3):
         print(
             f"Skipping interactive plot: output_dim is {output_dim}, but must be 2 or 3."
         )
@@ -294,15 +356,10 @@ def save_static_2d_plots(
             )
             use_gpu_backend = False
 
-    reproducibility = getattr(cfg, "reproducibility", None) if cfg is not None else None
-    deterministic = bool(getattr(reproducibility, "deterministic", False))
-    umap_seed = None
-    if deterministic:
-        umap_seed = getattr(reproducibility, "seed", None)
-        if umap_seed is None and cfg is not None:
-            eval_cfg = getattr(cfg, "evaluation", None)
-            if eval_cfg is not None:
-                umap_seed = getattr(eval_cfg, "random_state", None)
+    deterministic = cfg is not None and bool(
+        getattr(getattr(cfg, "reproducibility", None), "deterministic", False)
+    )
+    umap_seed = _resolve_umap_seed(cfg)
 
     umap_base_kwargs = dict(n_components=2, n_neighbors=15, min_dist=0.1)
     if deterministic and umap_seed is not None:
@@ -389,12 +446,10 @@ def run_knn_classification(
     label_map,
     output_dir: Path,
     knn_neighbors,
-
     enable_plots: bool = True,
     backend: str = "auto",
     use_gpu: bool | None = None,
     faiss_gpu_id: int = 0,
-
 ):
     """k-NN classification for discrete labels."""
     print("\nRunning k-NN Classification evaluation...")
@@ -410,40 +465,7 @@ def run_knn_classification(
     y_train_cpu = y_train_cpu.astype(np.int64, copy=False)
     y_valid_cpu = y_valid_cpu.astype(np.int64, copy=False)
 
-    backend_choice = (backend or "auto").lower()
-    prefer_gpu = torch.cuda.is_available() if use_gpu is None else bool(use_gpu)
-    faiss_use_gpu = False
-
-    if backend_choice == "auto":
-        use_cuml = prefer_gpu and _should_use_cuml()
-        if use_cuml:
-            selected_backend = "cuml"
-        else:
-            faiss_available, faiss_use_gpu = _resolve_faiss_backend(
-                None if use_gpu is None else prefer_gpu,
-                strict=False,
-            )
-            selected_backend = "faiss" if faiss_available else "sklearn"
-    elif backend_choice == "cuml":
-        if _read_env_flag("CEBRA_DISABLE_CUML") is True:
-            raise RuntimeError("cuML backend is disabled via CEBRA_DISABLE_CUML.")
-        if not _CUML_AVAILABLE:
-            raise RuntimeError("cuML backend requested but cuML is not installed.")
-        if not torch.cuda.is_available():
-            raise RuntimeError("cuML backend requested but no CUDA device is available.")
-        if use_gpu is False:
-            raise RuntimeError("cuML backend requires GPU execution (use_gpu=True).")
-        selected_backend = "cuml"
-    elif backend_choice == "faiss":
-        faiss_available, faiss_use_gpu = _resolve_faiss_backend(
-            prefer_gpu,
-            strict=True,
-        )
-        if not faiss_available:
-            raise RuntimeError("FAISS backend requested but faiss is not installed.")
-        selected_backend = "faiss"
-    else:
-        selected_backend = "sklearn"
+    selected_backend, faiss_use_gpu = _resolve_knn_backend(backend, use_gpu)
 
     y_pred = None
     knn_cpu_model: KNeighborsClassifier | None = None
@@ -476,9 +498,7 @@ def run_knn_classification(
             use_gpu=faiss_use_gpu,
             gpu_id=faiss_gpu_id,
         )
-        distances = np.sqrt(np.maximum(np.asarray(distances, dtype=np.float64), 0.0))
-        # Avoid division by zero
-        weights = 1.0 / np.maximum(distances, 1e-12)
+        weights = _compute_faiss_weights(distances)
         neighbor_labels = y_train_cpu[indices.astype(np.int64, copy=False)]
         all_labels = np.array(sorted(label_map.keys()), dtype=np.int64)
         y_pred = _faiss_weighted_classification(neighbor_labels, weights, all_labels)
@@ -551,40 +571,7 @@ def run_knn_regression(
     y_train_cpu = np.asarray(y_train, dtype=np.float32)
     y_valid_cpu = np.asarray(y_valid, dtype=np.float32)
 
-    backend_choice = (backend or "auto").lower()
-    prefer_gpu = torch.cuda.is_available() if use_gpu is None else bool(use_gpu)
-    faiss_use_gpu = False
-
-    if backend_choice == "auto":
-        use_cuml = prefer_gpu and _should_use_cuml()
-        if use_cuml:
-            selected_backend = "cuml"
-        else:
-            faiss_available, faiss_use_gpu = _resolve_faiss_backend(
-                None if use_gpu is None else prefer_gpu,
-                strict=False,
-            )
-            selected_backend = "faiss" if faiss_available else "sklearn"
-    elif backend_choice == "cuml":
-        if _read_env_flag("CEBRA_DISABLE_CUML") is True:
-            raise RuntimeError("cuML backend is disabled via CEBRA_DISABLE_CUML.")
-        if not _CUML_AVAILABLE:
-            raise RuntimeError("cuML backend requested but cuML is not installed.")
-        if not torch.cuda.is_available():
-            raise RuntimeError("cuML backend requested but no CUDA device is available.")
-        if use_gpu is False:
-            raise RuntimeError("cuML backend requires GPU execution (use_gpu=True).")
-        selected_backend = "cuml"
-    elif backend_choice == "faiss":
-        faiss_available, faiss_use_gpu = _resolve_faiss_backend(
-            prefer_gpu,
-            strict=True,
-        )
-        if not faiss_available:
-            raise RuntimeError("FAISS backend requested but faiss is not installed.")
-        selected_backend = "faiss"
-    else:
-        selected_backend = "sklearn"
+    selected_backend, faiss_use_gpu = _resolve_knn_backend(backend, use_gpu)
 
     y_pred = None
 
@@ -612,8 +599,7 @@ def run_knn_regression(
             use_gpu=faiss_use_gpu,
             gpu_id=faiss_gpu_id,
         )
-        distances = np.sqrt(np.maximum(np.asarray(distances, dtype=np.float64), 0.0))
-        weights = 1.0 / np.maximum(distances, 1e-12)
+        weights = _compute_faiss_weights(distances)
         y_train_matrix = y_train_cpu
         if y_train_matrix.ndim == 1:
             y_train_matrix = y_train_matrix[:, None]
@@ -650,17 +636,14 @@ def run_consistency_check(
     cfg: AppConfig,
     output_dir: Path,
     y_valid=None,
-
     dataset_embeddings=None,
     embeddings_list=None,
     labels_list=None,
-
     dataset_ids=None,
     enable_plots: bool = True,
     step: int | None = None,
     log_to_wandb: bool | None = None,
 ):
-
     print("\n--- Step 6: Running Consistency Check ---")
     check_cfg = cfg.consistency_check
 

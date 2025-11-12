@@ -27,6 +27,7 @@ from src.embeddings import (
     clear_last_hidden_state_cache,
     get_embeddings,
     get_last_hidden_state_cache,
+    resolve_layer_index,
 )
 from src.results import (
     run_consistency_check,
@@ -46,29 +47,63 @@ from src.utils import (
 load_dotenv()
 
 
-def resolve_layer_index(layer_count: int, requested: Optional[int]) -> int:
-    """
-    Resolve the requested hidden state layer index into a non-negative integer.
+def _resolve_shuffle_seed(cfg: AppConfig) -> Optional[int]:
+    """Resolve shuffle seed from configuration."""
+    if getattr(cfg.dataset, "shuffle_seed", None) is not None:
+        return cfg.dataset.shuffle_seed
+    if hasattr(cfg, "evaluation"):
+        return cfg.evaluation.random_state
+    return None
 
-    Parameters
-    ----------
-    layer_count : int
-        Total number of layers available in the cached tensor.
-    requested : Optional[int]
-        The layer index specified in the configuration (can be negative or None).
-        When None, the final hidden state is selected.
-    """
-    if layer_count <= 0:
-        raise ValueError("Layer cache is empty; cannot select a hidden state layer.")
-    index = layer_count - 1 if requested is None else requested
-    if index < 0:
-        index += layer_count
-    if index < 0 or index >= layer_count:
-        raise ValueError(
-            f"Layer index {requested} is out of bounds for cached tensor with "
-            f"{layer_count} layers."
-        )
-    return index
+
+def _load_cached_embeddings(
+    cache, ids, cfg: AppConfig
+) -> Optional[np.ndarray]:
+    """Load embeddings from cache if available and valid."""
+    if cache is None:
+        return None
+
+    cached_ids, cached_embeddings, cached_seed, cached_layer_embeddings = cache
+    seed = _resolve_shuffle_seed(cfg)
+    if cached_seed != seed:
+        print("Cached embeddings shuffle seed mismatch. Recomputing...")
+        return None
+
+    # Convert ids to strings once for efficient lookup
+    str_ids = [str(i) for i in ids]
+    id_to_index = {str(cached_id): idx for idx, cached_id in enumerate(cached_ids)}
+    
+    try:
+        if (
+            cfg.embedding.type == "hf_transformer"
+            and cached_layer_embeddings is not None
+        ):
+            target_layer = resolve_layer_index(
+                cached_layer_embeddings.shape[1],
+                getattr(cfg.embedding, "hidden_state_layer", None),
+            )
+            selection_indices = np.asarray(
+                [id_to_index[sid] for sid in str_ids], dtype=int
+            )
+            return cached_layer_embeddings[
+                selection_indices, target_layer, :
+            ]
+        else:
+            return np.stack(
+                [cached_embeddings[id_to_index[sid]] for sid in str_ids]
+            )
+    except KeyError:
+        print("Cached embeddings are missing required ids. Recomputing...")
+        return None
+    except ValueError:
+        # ValueError from resolve_layer_index for invalid layer indices
+        print("Invalid layer index in cached embeddings. Recomputing...")
+        return None
+
+
+def _should_log_to_wandb() -> bool:
+    """Check if we should log to wandb."""
+    return wandb.run is not None
 
 
 @hydra.main(config_path="conf", config_name="config", version_base="1.2")
@@ -85,6 +120,7 @@ def main(cfg: AppConfig) -> None:
 
     apply_reproducibility(cfg)
 
+    # Set device based on availability
     if torch.backends.mps.is_available():
         cfg.device = "mps"
     elif torch.cuda.is_available():
@@ -95,27 +131,23 @@ def main(cfg: AppConfig) -> None:
     output_dir = Path(HydraConfig.get().run.dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    run = None
-    run_id = None
-    is_main_process = True
-
     try:
-        if is_main_process:
-            run_name = HydraConfig.get().job.name
-            run = wandb.init(
-                project=cfg.wandb.project,
-                entity=cfg.wandb.entity,
-                name=run_name,
-                config=OmegaConf.to_container(cfg, resolve=True),
-            )
-            if run is not None:
-                run_id = run.id
-                print(f"W&B Run Name: {run_name}, Run ID: {run_id}")
-                (output_dir / "wandb_run_id.txt").write_text(run_id)
+        # Initialize wandb
+        run_name = HydraConfig.get().job.name
+        run = wandb.init(
+            project=cfg.wandb.project,
+            entity=cfg.wandb.entity,
+            name=run_name,
+            config=OmegaConf.to_container(cfg, resolve=True),
+        )
+        if run is not None:
+            run_id = run.id
+            print(f"W&B Run Name: {run_name}, Run ID: {run_id}")
+            (output_dir / "wandb_run_id.txt").write_text(run_id)
 
         arch = normalize_model_architecture(cfg.cebra.model_architecture)
         cfg.cebra.model_architecture = arch
-        if is_main_process and wandb.run is not None:
+        if _should_log_to_wandb():
             wandb.config.update(
                 {
                     "cebra_output_dim": cfg.cebra.output_dim,
@@ -133,44 +165,9 @@ def main(cfg: AppConfig) -> None:
         print("\n--- Step 2: Generating text embeddings ---")
         embedding_cache_path = get_embedding_cache_path(cfg)
         cache = load_text_embedding(embedding_cache_path)
-        seed = (
-            cfg.dataset.shuffle_seed
-            if getattr(cfg.dataset, "shuffle_seed", None) is not None
-            else (cfg.evaluation.random_state if hasattr(cfg, "evaluation") else None)
-        )
+        seed = _resolve_shuffle_seed(cfg)
 
-        X_vectors = None
-        if cache is not None:
-            cached_ids, cached_embeddings, cached_seed, cached_layer_embeddings = cache
-            if cached_seed == seed:
-                id_to_index = {str(i): idx for idx, i in enumerate(cached_ids)}
-                try:
-                    if (
-                        cfg.embedding.type == "hf_transformer"
-                        and cached_layer_embeddings is not None
-                    ):
-                        target_layer = resolve_layer_index(
-                            cached_layer_embeddings.shape[1],
-                            getattr(cfg.embedding, "hidden_state_layer", None),
-                        )
-                        selection_indices = np.asarray(
-                            [id_to_index[str(i)] for i in ids], dtype=int
-                        )
-                        X_vectors = cached_layer_embeddings[
-                            selection_indices, target_layer, :
-                        ]
-                    else:
-                        X_vectors = np.stack(
-                            [cached_embeddings[id_to_index[str(i)]] for i in ids]
-                        )
-                except KeyError:
-                    print("Cached embeddings are missing required ids. Recomputing...")
-                    X_vectors = None
-                except ValueError as exc:
-                    print(f"{exc} Recomputing embeddings...")
-                    X_vectors = None
-            else:
-                print("Cached embeddings shuffle seed mismatch. Recomputing...")
+        X_vectors = _load_cached_embeddings(cache, ids, cfg)
         if X_vectors is None:
             X_vectors = get_embeddings(texts, cfg)
             layer_cache = get_last_hidden_state_cache()
@@ -205,7 +202,7 @@ def main(cfg: AppConfig) -> None:
         cebra_model = train_cebra(X_train, labels_for_training, cfg, output_dir)
         model_path = save_cebra_model(cebra_model, output_dir)
 
-        if is_main_process and wandb.run is not None:
+        if _should_log_to_wandb():
             model_artifact = wandb.Artifact(name=model_path.stem, type="model")
             model_artifact.add_file(str(model_path))
             wandb.log_artifact(model_artifact)
@@ -215,7 +212,7 @@ def main(cfg: AppConfig) -> None:
         cebra_embeddings_full = transform_cebra(cebra_model, X_vectors, cfg.device)
         if cfg.cebra.save_embeddings:
             emb_path = save_cebra_embeddings(cebra_embeddings_full, output_dir)
-            if is_main_process and wandb.run is not None:
+            if _should_log_to_wandb():
                 emb_artifact = wandb.Artifact(name=emb_path.stem, type="embeddings")
                 emb_artifact.add_file(str(emb_path))
                 wandb.log_artifact(emb_artifact)
@@ -228,9 +225,10 @@ def main(cfg: AppConfig) -> None:
         if cfg.cebra.conditional == "discrete":
             print("Running discrete evaluation and visualization...")
             label_map = {int(k): v for k, v in cfg.dataset.label_map.items()}
+            # Normalize binary labels from {-1, 1} to {0, 1}
             if set(conditional_data) == {-1, 1}:
-                conditional_data = [0 if x == -1 else 1 for x in conditional_data]
-            text_labels_full = [label_map[l] for l in conditional_data]
+                conditional_data = np.where(np.asarray(conditional_data) == -1, 0, 1).tolist()
+            text_labels_full = [label_map[label] for label in conditional_data]
             palette = OmegaConf.to_container(
                 cfg.dataset.visualization.emotion_colors, resolve=True
             )
@@ -248,11 +246,7 @@ def main(cfg: AppConfig) -> None:
                     "Interactive CEBRA (Discrete)",
                     interactive_path,
                 )
-                if (
-                    interactive_path.exists()
-                    and is_main_process
-                    and wandb.run is not None
-                ):
+                if interactive_path.exists() and _should_log_to_wandb():
                     vis_artifact = wandb.Artifact(
                         name=interactive_path.stem, type="evaluation"
                     )
@@ -267,7 +261,7 @@ def main(cfg: AppConfig) -> None:
                     output_dir,
                     order,
                 )
-                if is_main_process and wandb.run is not None:
+                if _should_log_to_wandb():
                     static_artifact = wandb.Artifact(
                         "cebra-static-plots", type="evaluation"
                     )
@@ -287,11 +281,11 @@ def main(cfg: AppConfig) -> None:
                 backend=cfg.evaluation.knn_backend,
                 faiss_gpu_id=cfg.evaluation.faiss_gpu_id,
             )
-            if is_main_process and wandb.run is not None:
+            if _should_log_to_wandb():
                 wandb.log({"knn_accuracy": accuracy})
             report_path = output_dir / "classification_report.json"
             pd.Series(report).to_json(report_path, indent=4)
-            if is_main_process and wandb.run is not None:
+            if _should_log_to_wandb():
                 report_artifact = wandb.Artifact(
                     name=report_path.stem, type="evaluation"
                 )
@@ -311,11 +305,7 @@ def main(cfg: AppConfig) -> None:
                     title="Interactive CEBRA (None - Colored by Valence)",
                     output_path=interactive_path,
                 )
-                if (
-                    interactive_path.exists()
-                    and is_main_process
-                    and wandb.run is not None
-                ):
+                if interactive_path.exists() and _should_log_to_wandb():
                     vis_artifact = wandb.Artifact(
                         name=interactive_path.stem, type="evaluation"
                     )
@@ -332,7 +322,7 @@ def main(cfg: AppConfig) -> None:
                 backend=cfg.evaluation.knn_backend,
                 faiss_gpu_id=cfg.evaluation.faiss_gpu_id,
             )
-            if is_main_process and wandb.run is not None:
+            if _should_log_to_wandb():
                 wandb.log({"knn_regression_mse": mse, "knn_regression_r2": r2})
 
         # --- 7. Consistency Check ---
@@ -357,10 +347,10 @@ def main(cfg: AppConfig) -> None:
                     cfg,
                     output_dir,
                     dataset_embeddings=embeddings_list,
-                    labels=labels_list,
+                    labels_list=labels_list,
                     dataset_ids=cfg.consistency_check.dataset_ids,
                     enable_plots=cfg.evaluation.enable_plots,
-                    log_to_wandb=is_main_process,
+                    log_to_wandb=True,
                 )
             else:
                 run_consistency_check(
@@ -370,10 +360,10 @@ def main(cfg: AppConfig) -> None:
                     cfg,
                     output_dir,
                     enable_plots=cfg.evaluation.enable_plots,
-                    log_to_wandb=is_main_process,
+                    log_to_wandb=True,
                 )
     finally:
-        if is_main_process and wandb.run is not None:
+        if _should_log_to_wandb():
             wandb.finish()
 
     print("\n--- Pipeline Complete ---")

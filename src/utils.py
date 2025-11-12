@@ -27,7 +27,6 @@ def get_embedding_cache_path(cfg):
     # Create a filename-safe version of the embedding name
     safe_embedding_name = embedding_name.replace('/', '__')
 
-
     filename = f"{dataset_name}__{safe_embedding_name}"
     if getattr(cfg.dataset, "shuffle", False):
         seed = getattr(cfg.dataset, "shuffle_seed", None)
@@ -75,20 +74,19 @@ def save_text_embedding(ids, embeddings, shuffle_seed, path: Path, layer_embeddi
 
 def load_text_embedding(path: Path):
     """Loads cached ids and embeddings from the specified path if it exists."""
-    if path.exists():
-        print(f"Found cached text embeddings at {path}. Loading...")
-
-        data = np.load(path, allow_pickle=True)
-        ids = data["ids"]
-        embeddings = data["embeddings"]
-        shuffle_seed = data["shuffle_seed"].item() if "shuffle_seed" in data else None
-        layer_embeddings = data["layer_embeddings"] if "layer_embeddings" in data.files else None
-        print("...done.")
-        return ids, embeddings, shuffle_seed, layer_embeddings
-
-    else:
+    if not path.exists():
         print(f"No cached text embeddings found at {path}.")
         return None
+
+    print(f"Found cached text embeddings at {path}. Loading...")
+
+    data = np.load(path, allow_pickle=True)
+    ids = data["ids"]
+    embeddings = data["embeddings"]
+    shuffle_seed = data["shuffle_seed"].item() if "shuffle_seed" in data.files else None
+    layer_embeddings = data["layer_embeddings"] if "layer_embeddings" in data.files else None
+    print("...done.")
+    return ids, embeddings, shuffle_seed, layer_embeddings
 
 
 def apply_reproducibility(cfg: "AppConfig") -> None:
@@ -100,13 +98,15 @@ def apply_reproducibility(cfg: "AppConfig") -> None:
 
     base_seed = int(repro_cfg.seed)
 
+    # Handle distributed training seed synchronization
     if dist.is_available() and dist.is_initialized():
         seed_container = [base_seed]
         dist.broadcast_object_list(seed_container, src=0)
         base_seed = seed_container[0]
         rank = dist.get_rank()
     else:
-        rank = int(getattr(getattr(cfg, "ddp", None), "rank", 0) or 0)
+        ddp_cfg = getattr(cfg, "ddp", None)
+        rank = int(getattr(ddp_cfg, "rank", 0) or 0)
 
     seed = base_seed + rank
 

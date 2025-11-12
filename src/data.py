@@ -48,11 +48,9 @@ def _download_trec_split(split: str, dataset_cfg) -> pd.DataFrame:
 
 
 def _load_trec_from_source(dataset_cfg, splits: List[str]) -> List[pd.DataFrame]:
-    requested_splits = splits or list(_TREC_URLS.keys())
+    requested_splits = splits or list(_TREC_URLS)
     frames: List[pd.DataFrame] = []
     for split in requested_splits:
-        if split not in _TREC_URLS:
-            raise ValueError(f"Unsupported split '{split}' for TREC dataset.")
         frames.append(_download_trec_split(split, dataset_cfg))
     return frames
 
@@ -73,8 +71,7 @@ def _load_20newsgroups_from_source(dataset_cfg, splits: List[str]) -> List[pd.Da
                 f"Unsupported split '{split}' for 20 Newsgroups dataset."
             )
 
-        subset = split
-        data = fetch_20newsgroups(subset=subset, shuffle=False)
+        data = fetch_20newsgroups(subset=split, shuffle=False)
 
         if expected_label_order is not None:
             target_names = list(data.target_names)
@@ -118,7 +115,8 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
                     dataset_cfg.hf_path,
                     **load_kwargs,
                 )
-                datasets = [dataset[split] for split in dataset.keys()]
+                dataset_keys = dataset.keys()
+                datasets = [dataset[split] for split in dataset_keys]
         except (RuntimeError, ValueError) as err:
             if dataset_cfg.hf_path == "trec" and _should_use_trec_fallback(err):
                 print("Falling back to manual download for the TREC dataset.")
@@ -129,16 +127,18 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
         df = pd.concat(all_splits, ignore_index=True)
     elif dataset_cfg.source == "csv":
         dataset = load_dataset("csv", data_files=dataset_cfg.data_files)
-        all_splits = [pd.DataFrame(dataset[split]) for split in dataset.keys()]
+        dataset_keys = dataset.keys()
+        all_splits = [pd.DataFrame(dataset[split]) for split in dataset_keys]
         df = pd.concat(all_splits, ignore_index=True)
     elif dataset_cfg.source == "kaggle":
-
         if not dataset_cfg.kaggle_handle:
             raise ValueError(
                 "dataset.kaggle_handle must be set when dataset.source is 'kaggle'"
             )
+        
         path = kagglehub.dataset_download(dataset_cfg.kaggle_handle)
-
+        
+        # Determine CSV file path: use specified file or find first CSV file
         if dataset_cfg.data_files:
             csv_path = os.path.join(path, dataset_cfg.data_files)
             if not os.path.exists(csv_path):
@@ -146,7 +146,8 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
                     f"Specified data file not found in Kaggle dataset directory: {csv_path}"
                 )
         else:
-            csv_files = [f for f in os.listdir(path) if f.endswith(".csv")]
+            all_files = os.listdir(path)
+            csv_files = [f for f in all_files if f.endswith(".csv")]
             if not csv_files:
                 raise FileNotFoundError("No CSV files found in Kaggle dataset directory")
             csv_path = os.path.join(path, csv_files[0])
@@ -169,6 +170,12 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
     # Special handling for go_emotions variants: optionally drop multi-label rows and collapse lists.
     if dataset_cfg.hf_path == "go_emotions" and dataset_cfg.label_column is not None:
         label_col = dataset_cfg.label_column
+        
+        def _collapse_go_emotions_label(value):
+            if isinstance(value, (list, tuple)):
+                return value[0] if len(value) > 0 else np.nan
+            return value
+        
         if dataset_cfg.drop_multi_label_samples:
             print("Applying go_emotions filter: removing multi-label samples.")
             before_count = len(df)
@@ -177,11 +184,7 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
             print(f"go_emotions samples after filtering: {after_count} (removed {before_count - after_count}).")
         else:
             print("Applying special handling for go_emotions: using only the first label.")
-        def _collapse_go_emotions_label(value):
-            if isinstance(value, (list, tuple)):
-                return value[0] if len(value) > 0 else np.nan
-            return value
-
+        
         df[label_col] = df[label_col].apply(_collapse_go_emotions_label)
 
     if dataset_cfg.label_column is not None and dataset_cfg.label_remap:
@@ -190,13 +193,17 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
         df = df[df[label_col].isin(remap.keys())].reset_index(drop=True)
         df[label_col] = df[label_col].map(remap).astype(np.int64)
 
+    # Filter to valid labels for single-label datasets
     if dataset_cfg.label_column is not None and not dataset_cfg.multi_label:
         valid_labels = set(dataset_cfg.label_map.keys())
         df = df[df[dataset_cfg.label_column].isin(valid_labels)].reset_index(drop=True)
+    
+    # Drop rows with missing values based on conditional mode
     if conditional_mode == "none":
         # Expect V, A, D columns and drop rows with missing values
         df = df.dropna(subset=[dataset_cfg.text_column, "V", "A", "D"]).reset_index(drop=True)
     else:
+        # Non-none conditional mode: determine columns to check for missing values
         if dataset_cfg.multi_label:
             if dataset_cfg.label_columns:
                 subset_cols = [dataset_cfg.text_column] + dataset_cfg.label_columns
@@ -206,59 +213,66 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
                 raise ValueError(
                     "multi_label=True requires either label_columns or label_column"
                 )
-            df = df.dropna(subset=subset_cols).reset_index(drop=True)
         else:
             if dataset_cfg.label_column is None:
                 raise ValueError(
                     "dataset.label_column must be set when cfg.cebra.conditional is not 'none'"
                 )
-            df = df.dropna(subset=[dataset_cfg.text_column, dataset_cfg.label_column]).reset_index(drop=True)
+            subset_cols = [dataset_cfg.text_column, dataset_cfg.label_column]
+        
+        df = df.dropna(subset=subset_cols).reset_index(drop=True)
 
-    df = df.reset_index(drop=True)
     if "id" not in df.columns:
         df["id"] = np.arange(len(df))
 
     if cfg.dataset.shuffle:
         seed = (
             cfg.dataset.shuffle_seed
-            if getattr(cfg.dataset, "shuffle_seed", None) is not None
+            if cfg.dataset.shuffle_seed is not None
             else (cfg.evaluation.random_state if hasattr(cfg, "evaluation") else None)
         )
         df = df.sample(frac=1, random_state=seed).reset_index(drop=True)
 
     ids = df["id"].astype(str).to_numpy()
 
+    # Extract conditional data based on mode
     if conditional_mode == "none":
         conditional_data = df[["V", "A", "D"]].to_numpy(dtype=np.float32)
-    else:
-        if dataset_cfg.multi_label:
-            label_order = [dataset_cfg.label_map[i] for i in sorted(dataset_cfg.label_map.keys())]
-            if dataset_cfg.label_columns:
-                ordered_cols = [lbl for lbl in label_order if lbl in dataset_cfg.label_columns]
-                if len(ordered_cols) != len(label_order):
-                    raise ValueError(
-                        "label_columns must contain all labels from label_map"
-                    )
-                conditional_data = df[ordered_cols].astype(int).to_numpy()
-            elif dataset_cfg.label_column is not None and dataset_cfg.label_delimiter:
-                delimiter = dataset_cfg.label_delimiter
-                mapping = {label: idx for idx, label in enumerate(label_order)}
-                label_matrix = np.zeros((len(df), len(label_order)), dtype=int)
-                for i, entry in enumerate(df[dataset_cfg.label_column].astype(str)):
-                    if pd.isna(entry):
-                        continue
-                    labels = [lab.strip() for lab in entry.split(delimiter) if lab.strip()]
-                    for lab in labels:
-                        if lab in mapping:
-                            label_matrix[i, mapping[lab]] = 1
-                conditional_data = label_matrix
-            else:
+    elif dataset_cfg.multi_label:
+        # Multi-label mode: extract from columns or delimited strings
+        label_order = [dataset_cfg.label_map[i] for i in sorted(dataset_cfg.label_map.keys())]
+        
+        if dataset_cfg.label_columns:
+            # Extract from multiple label columns
+            label_columns_set = set(dataset_cfg.label_columns)
+            ordered_cols = [lbl for lbl in label_order if lbl in label_columns_set]
+            if len(ordered_cols) != len(label_order):
                 raise ValueError(
-                    "multi_label=True requires label_columns or label_delimiter with label_column"
+                    "label_columns must contain all labels from label_map"
                 )
+            conditional_data = df[ordered_cols].astype(int).to_numpy()
+        elif dataset_cfg.label_column is not None and dataset_cfg.label_delimiter:
+            # Extract from delimited label strings
+            delimiter = dataset_cfg.label_delimiter
+            mapping = {label: idx for idx, label in enumerate(label_order)}
+            label_matrix = np.zeros((len(df), len(label_order)), dtype=int)
+            label_column_str = df[dataset_cfg.label_column].astype(str)
+            for i, entry in enumerate(label_column_str):
+                if pd.isna(entry):
+                    continue
+                labels = [lab.strip() for lab in entry.split(delimiter) if lab.strip()]
+                for lab in labels:
+                    if lab in mapping:
+                        label_matrix[i, mapping[lab]] = 1
+            conditional_data = label_matrix
         else:
-            labels = df[dataset_cfg.label_column]
-            conditional_data = labels.to_numpy()
+            raise ValueError(
+                "multi_label=True requires label_columns or label_delimiter with label_column"
+            )
+    else:
+        # Single-label mode: extract from single label column
+        labels = df[dataset_cfg.label_column]
+        conditional_data = labels.to_numpy()
 
     texts = df[dataset_cfg.text_column].astype(str)
     texts_list = texts.tolist()
