@@ -44,12 +44,14 @@ def main(cfg: AppConfig) -> None:
     cfg = OmegaConf.merge(default_cfg, cfg)
     OmegaConf.set_struct(cfg, False)
     cfg.cebra.conditional = cfg.cebra.conditional.lower()
+    conditional_type = cfg.cebra.conditional
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
     cfg.ddp.world_size = int(os.environ.get("WORLD_SIZE", 1))
     cfg.ddp.rank = int(os.environ.get("RANK", 0))
     cfg.ddp.local_rank = local_rank
     apply_reproducibility(cfg)
     is_main_process = cfg.ddp.rank == 0
+    cuda_available = torch.cuda.is_available()
     if cfg.ddp.world_size > 1:
         if "RANK" not in os.environ or "LOCAL_RANK" not in os.environ:
             print(
@@ -61,10 +63,10 @@ def main(cfg: AppConfig) -> None:
                 backend="nccl", rank=cfg.ddp.rank, world_size=cfg.ddp.world_size
             )
             torch.cuda.set_device(local_rank)
-            if torch.cuda.is_available():
+            if cuda_available:
                 cfg.device = f"cuda:{local_rank}"
     else:
-        if torch.cuda.is_available():
+        if cuda_available:
             cfg.device = "cuda"
     output_dir = Path(HydraConfig.get().run.dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -88,7 +90,8 @@ def main(cfg: AppConfig) -> None:
 
         arch = normalize_model_architecture(cfg.cebra.model_architecture)
         cfg.cebra.model_architecture = arch
-        if is_main_process and wandb.run is not None:
+        wandb_run_active = is_main_process and wandb.run is not None
+        if wandb_run_active:
             wandb.config.update(
                 {
                     "cebra_output_dim": cfg.cebra.output_dim,
@@ -112,20 +115,20 @@ def main(cfg: AppConfig) -> None:
             X_vectors, conditional_data, time_indices,
             test_size=cfg.evaluation.test_size,
             random_state=cfg.evaluation.random_state,
-            stratify=(conditional_data if cfg.cebra.conditional == 'discrete' else None)
+            stratify=(conditional_data if conditional_type == 'discrete' else None)
         )
 
         # --- 4. Train CEBRA ---
         print("\n--- Step 4: Training CEBRA model ---")
 
         labels_for_training = (
-            None if cfg.cebra.conditional == "none" else conditional_train
+            None if conditional_type == "none" else conditional_train
         )
         cebra_model = train_cebra(X_train, labels_for_training, cfg, output_dir)
         model_path = save_cebra_model(cebra_model, output_dir)
 
 
-        if is_main_process and wandb.run is not None:
+        if wandb_run_active:
             model_artifact = wandb.Artifact(name=model_path.stem, type="model")
             model_artifact.add_file(str(model_path))
             wandb.log_artifact(model_artifact)
@@ -135,7 +138,7 @@ def main(cfg: AppConfig) -> None:
         cebra_embeddings_full = transform_cebra(cebra_model, X_vectors, cfg.device)
         if cfg.cebra.save_embeddings:
             emb_path = save_cebra_embeddings(cebra_embeddings_full, output_dir)
-            if is_main_process and wandb.run is not None:
+            if wandb_run_active:
                 emb_artifact = wandb.Artifact(name=emb_path.stem, type="embeddings")
                 emb_artifact.add_file(str(emb_path))
                 wandb.log_artifact(emb_artifact)
@@ -146,13 +149,14 @@ def main(cfg: AppConfig) -> None:
         print("\n--- Step 6: Visualization and Evaluation ---")
     
         # ★★★ ここからが具体的な分岐ロジック ★★★
-        if cfg.cebra.conditional == 'discrete':
+        if conditional_type == 'discrete':
             # [DISCRETE CASE]
             print("Running discrete evaluation and visualization...")
             label_map = {int(k): v for k, v in cfg.dataset.label_map.items()}
             labels = np.asarray(conditional_data, dtype=int)
             # 半角スペース4つなどでインデントし直して貼ってください
-            if set(conditional_data) == {-1, 1}:
+            conditional_set = set(conditional_data)
+            if conditional_set == {-1, 1}:
                 conditional_data = [0 if x == -1 else 1 for x in conditional_data]
             text_labels_full = [label_map[l] for l in conditional_data]
             palette = OmegaConf.to_container(cfg.dataset.visualization.emotion_colors, resolve=True)
@@ -169,11 +173,7 @@ def main(cfg: AppConfig) -> None:
                     "Interactive CEBRA (Discrete)",
                     interactive_path,
                 )
-                if (
-                    interactive_path.exists()
-                    and is_main_process
-                    and wandb.run is not None
-                ):
+                if interactive_path.exists() and wandb_run_active:
                     vis_artifact = wandb.Artifact(
                         name=interactive_path.stem, type="evaluation"
                     )
@@ -181,7 +181,7 @@ def main(cfg: AppConfig) -> None:
                     wandb.log_artifact(vis_artifact)
                 save_static_2d_plots(cebra_embeddings_full, text_labels_full, palette, "CEBRA Embeddings (Discrete)", output_dir, order)
 
-                if is_main_process and wandb.run is not None:
+                if wandb_run_active:
                     static_artifact = wandb.Artifact("cebra-static-plots", type="evaluation")
                     static_artifact.add_file(str(output_dir / "static_PCA_plot.png"))
                     static_artifact.add_file(str(output_dir / "static_UMAP_plot.png"))
@@ -196,16 +196,16 @@ def main(cfg: AppConfig) -> None:
                 backend=cfg.evaluation.knn_backend,
                 faiss_gpu_id=cfg.evaluation.faiss_gpu_id,
             )
-            if is_main_process and wandb.run is not None:
+            if wandb_run_active:
                 wandb.log({"knn_accuracy": accuracy})
             report_path = output_dir / "classification_report.json"
             pd.Series(report).to_json(report_path, indent=4)
-            if is_main_process and wandb.run is not None:
+            if wandb_run_active:
                 report_artifact = wandb.Artifact(name=report_path.stem, type="evaluation")
                 report_artifact.add_file(str(report_path))
                 wandb.log_artifact(report_artifact)
 
-        elif cfg.cebra.conditional == 'none':
+        elif conditional_type == 'none':
             # [None CASE]
             print("Running None evaluation and visualization...")
         
@@ -220,11 +220,7 @@ def main(cfg: AppConfig) -> None:
                     title="Interactive CEBRA (None - Colored by Valence)",
                     output_path=interactive_path
                 )
-                if (
-                    interactive_path.exists()
-                    and is_main_process
-                    and wandb.run is not None
-                ):
+                if interactive_path.exists() and wandb_run_active:
                     vis_artifact = wandb.Artifact(
                         name=interactive_path.stem, type="evaluation"
                     )
@@ -240,7 +236,7 @@ def main(cfg: AppConfig) -> None:
                 backend=cfg.evaluation.knn_backend,
                 faiss_gpu_id=cfg.evaluation.faiss_gpu_id,
             )
-            if is_main_process and wandb.run is not None:
+            if wandb_run_active:
                 wandb.log({"knn_regression_mse": mse, "knn_regression_r2": r2})
 
         # --- 7. Consistency Check ---
@@ -248,7 +244,8 @@ def main(cfg: AppConfig) -> None:
             print("\n--- Step 7: Running Consistency Check ---")
             if cfg.consistency_check.mode == "datasets":
                 embeddings_list = []
-                embedding_dir = Path(get_original_cwd()) / "conf" / "embedding"
+                original_cwd = get_original_cwd()
+                embedding_dir = Path(original_cwd) / "conf" / "embedding"
                 for emb_name in cfg.consistency_check.dataset_ids:
                     emb_path = embedding_dir / f"{emb_name}.yaml"
                     emb_conf = OmegaConf.load(emb_path)
@@ -281,7 +278,7 @@ def main(cfg: AppConfig) -> None:
                     log_to_wandb=is_main_process,
                 )
     finally:
-        if is_main_process and wandb.run is not None:
+        if wandb_run_active:
             wandb.finish()
         if cfg.ddp.world_size > 1 and dist.is_initialized():
             dist.destroy_process_group()

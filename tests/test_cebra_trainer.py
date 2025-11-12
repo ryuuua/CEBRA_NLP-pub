@@ -87,10 +87,7 @@ def test_train_one_step_no_type_error():
     cfg = make_config(batch_size=8)
     X = np.random.rand(8, 5).astype(np.float32)
     y = np.array([0, 0, 0, 0, 1, 1, 1, 1])
-    try:
-        train_cebra(X, y, cfg, Path("."))
-    except TypeError as exc:  # pragma: no cover - ensure failure message
-        assert False, f"TypeError raised: {exc}"
+    train_cebra(X, y, cfg, Path("."))
 
 
 def test_train_infomse_loss():
