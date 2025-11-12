@@ -81,11 +81,12 @@ def _load_cfg(run_dir: Path, *, device_override: Optional[str] = None) -> AppCon
     cfg.cebra.model_architecture = normalize_model_architecture(
         getattr(cfg.cebra, "model_architecture", "offset0-model")
     )
-    cfg.device = (
-        _resolve_device(device_override)
-        if device_override is not None
-        else ("cuda" if torch.cuda.is_available() else "cpu")
-    )
+    
+    # Resolve device
+    if device_override is not None:
+        cfg.device = _resolve_device(device_override)
+    else:
+        cfg.device = "cuda" if torch.cuda.is_available() else "cpu"
 
     return cfg
 
@@ -145,16 +146,29 @@ def _resolve_visualization_paths(
     return viz_dir, interactive_path, expected_static, conditional_desc
 
 
+def _resolve_shuffle_seed(cfg: AppConfig) -> Optional[int]:
+    """Resolve shuffle seed from configuration."""
+    shuffle_seed = getattr(cfg.dataset, "shuffle_seed", None)
+    if shuffle_seed is not None:
+        return shuffle_seed
+    eval_cfg = getattr(cfg, "evaluation", None)
+    if eval_cfg is not None:
+        return getattr(eval_cfg, "random_state", None)
+    return None
+
+
 def _prepare_base_embeddings(cfg: AppConfig, ids: Iterable, texts: List[str]) -> np.ndarray:
     """Reuse cached embeddings when possible, otherwise recompute."""
     cache_path = get_embedding_cache_path(cfg)
     cache = load_text_embedding(cache_path)
     if cache is not None:
         cached_ids, cached_embeddings, cached_seed, cached_layer_embeddings = cache
-        id_to_index = {str(i): idx for idx, i in enumerate(cached_ids)}
+        # Convert ids to strings once for efficient lookup
+        str_ids = [str(i) for i in ids]
+        id_to_index = {str(cached_id): idx for idx, cached_id in enumerate(cached_ids)}
         try:
             selection_indices = np.asarray(
-                [id_to_index[str(i)] for i in ids], dtype=int
+                [id_to_index[sid] for sid in str_ids], dtype=int
             )
         except KeyError:
             selection_indices = None
@@ -173,11 +187,7 @@ def _prepare_base_embeddings(cfg: AppConfig, ids: Iterable, texts: List[str]) ->
     layer_cache = get_last_hidden_state_cache()
     if layer_cache is not None and layer_cache.shape[0] != embeddings.shape[0]:
         layer_cache = None  # fallback if cache mismatched
-    seed = (
-        getattr(cfg.dataset, "shuffle_seed", None)
-        if getattr(cfg.dataset, "shuffle_seed", None) is not None
-        else getattr(getattr(cfg, "evaluation", None), "random_state", None)
-    )
+    seed = _resolve_shuffle_seed(cfg)
     save_text_embedding(
         ids,
         embeddings,
@@ -286,8 +296,7 @@ def _generate_visualizations(
 
     # Use stored embeddings when present; otherwise rebuild from scratch.
     base_embeddings: Optional[np.ndarray] = None
-    embeddings_path = run_dir / "cebra_embeddings.npy"
-    if not embeddings_path.exists():
+    if not (run_dir / "cebra_embeddings.npy").exists():
         base_embeddings = _prepare_base_embeddings(cfg, ids, texts)
 
     cebra_embeddings = _load_cebra_embeddings(

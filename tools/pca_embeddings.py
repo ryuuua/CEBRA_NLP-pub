@@ -17,17 +17,33 @@ from src.utils import apply_reproducibility
 
 
 def _resolve_rng_seed(cfg: AppConfig) -> Optional[int]:
+    """Resolve random seed from configuration."""
     repro = getattr(cfg, "reproducibility", None)
+    if repro is not None:
+        seed = getattr(repro, "seed", None)
+        if seed is not None:
+            return int(seed)
+    
     dataset = getattr(cfg, "dataset", None)
+    if dataset is not None:
+        shuffle_seed = getattr(dataset, "shuffle_seed", None)
+        if shuffle_seed is not None:
+            return int(shuffle_seed)
+    
     evaluation = getattr(cfg, "evaluation", None)
-    for candidate in (
-        getattr(repro, "seed", None),
-        getattr(dataset, "shuffle_seed", None),
-        getattr(evaluation, "random_state", None),
-    ):
-        if candidate is not None:
-            return int(candidate)
+    if evaluation is not None:
+        random_state = getattr(evaluation, "random_state", None)
+        if random_state is not None:
+            return int(random_state)
+    
     return None
+
+
+def _resolve_n_components(requested: Optional[int], max_possible: int) -> int:
+    """Resolve the number of PCA components to use."""
+    if requested is None:
+        return max_possible
+    return min(requested, max_possible)
 
 
 def _fit_pca(embeddings: np.ndarray, cfg: AppConfig) -> Tuple[np.ndarray, np.ndarray]:
@@ -35,8 +51,8 @@ def _fit_pca(embeddings: np.ndarray, cfg: AppConfig) -> Tuple[np.ndarray, np.nda
     max_possible = min(embeddings.shape[0], embeddings.shape[1])
     if max_possible == 0:
         raise ValueError("Embeddings are empty; cannot fit PCA.")
-    requested = analysis_cfg.max_components
-    n_components = max_possible if requested is None else min(requested, max_possible)
+    
+    n_components = _resolve_n_components(analysis_cfg.max_components, max_possible)
     if n_components < 2:
         print(
             "[WARN] PCA has fewer than 2 components; 2D/3D projections will be limited."
@@ -47,14 +63,19 @@ def _fit_pca(embeddings: np.ndarray, cfg: AppConfig) -> Tuple[np.ndarray, np.nda
     return transformed, explained
 
 
+def _compute_variance_metrics(explained: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
+    """Compute cumulative and residual variance metrics."""
+    cumulative = np.cumsum(explained)
+    residual = np.maximum(0.0, 1.0 - cumulative)
+    return cumulative, residual
+
+
 def _determine_report_length(
-    explained: np.ndarray, cfg: AppConfig, min_required: int
+    explained: np.ndarray, cumulative: np.ndarray, residual: np.ndarray, cfg: AppConfig, min_required: int
 ) -> int:
     threshold = getattr(cfg.pca_analysis, "residual_variance_threshold", None)
     floor = getattr(cfg.pca_analysis, "component_variance_floor", None)
-    cumulative = np.cumsum(explained)
-    residual = np.maximum(0.0, 1.0 - cumulative)
-
+    
     if threshold is None or floor is None:
         return len(explained)
 
@@ -68,9 +89,8 @@ def _determine_report_length(
 def _build_variance_report(
     explained: np.ndarray, cfg: AppConfig, min_required: int
 ) -> pd.DataFrame:
-    cumulative = np.cumsum(explained)
-    residual = np.maximum(0.0, 1.0 - cumulative)
-    report_length = _determine_report_length(explained, cfg, min_required)
+    cumulative, residual = _compute_variance_metrics(explained)
+    report_length = _determine_report_length(explained, cumulative, residual, cfg, min_required)
     indices = np.arange(report_length)
     data = {
         "component": indices + 1,
@@ -97,13 +117,15 @@ def _maybe_subsample(
 
 
 def _resolve_export_dir(run_dir: Path, cfg: AppConfig) -> Path:
+    """Resolve the export directory for PCA results."""
     custom_dir = getattr(cfg.pca_analysis, "export_dir", None)
-    if custom_dir:
-        target = Path(custom_dir)
-        if not target.is_absolute():
-            target = Path(get_original_cwd()) / target
+    if not custom_dir:
+        return run_dir / "pca_analysis"
+    
+    target = Path(custom_dir)
+    if target.is_absolute():
         return target
-    return run_dir / "pca_analysis"
+    return Path(get_original_cwd()) / target
 
 
 @hydra.main(config_path="conf", config_name="config", version_base="1.2")
@@ -189,3 +211,4 @@ def run(cfg: AppConfig) -> None:
 
 if __name__ == "__main__":
     run()
+

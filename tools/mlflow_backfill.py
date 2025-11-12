@@ -155,7 +155,7 @@ def log_artifact_if_exists(path: Path, retry_count: int = 3, artifact_path: Opti
                     
                 except Exception as health_exc:
                     logger.error(f"Could not check MLflow server health: {health_exc}")
-        except Exception as exc:
+        except (OSError, IOError) as exc:
             logger.error(f"Unexpected error uploading artifact {path}: {exc}")
             logger.error(f"Full traceback: {traceback.format_exc()}")
             break
@@ -184,7 +184,7 @@ def load_wandb_metadata(run_id: str) -> Dict[str, Any]:
     try:
         return json.loads(metadata_file.read_text())
     except json.JSONDecodeError as exc:
-        print(f"[WARN] Could not parse W&B metadata for {run_id}: {exc}")
+        logger.warning(f"Could not parse W&B metadata for {run_id}: {exc}")
         return {}
 
 
@@ -208,8 +208,8 @@ def extract_wandb_project(run_id: str) -> Optional[str]:
         config = yaml.safe_load(config_file.read_text())
         project = config.get("wandb", {}).get("value", {}).get("project")
         return project
-    except Exception as exc:  # pragma: no cover - defensive
-        print(f"[WARN] Failed to extract W&B project for {run_id}: {exc}")
+    except (yaml.YAMLError, OSError, KeyError) as exc:
+        logger.warning(f"Failed to extract W&B project for {run_id}: {exc}")
         return None
 
 
@@ -226,7 +226,7 @@ def extract_wandb_run_name(run_id: str) -> Optional[str]:
 
         config = yaml.safe_load(config_file.read_text())
         return config.get("wandb", {}).get("value", {}).get("run_name")
-    except Exception:
+    except (yaml.YAMLError, OSError, KeyError):
         return None
 
 
@@ -288,13 +288,12 @@ def check_mlflow_server_health(tracking_uri: str) -> bool:
             if response.status_code == 200:
                 logger.info("MLflow server API check: OK")
                 return True
-            else:
-                logger.warning(f"MLflow server API returned status {response.status_code}")
+            logger.warning(f"MLflow server API returned status {response.status_code}")
         except requests.exceptions.RequestException as exc:
             logger.error(f"MLflow server API check failed: {exc}")
             
         return False
-    except Exception as exc:
+    except (ImportError, ValueError, AttributeError) as exc:
         logger.error(f"Error checking MLflow server health: {exc}")
         return False
 
@@ -343,7 +342,7 @@ def check_existing_run(experiment_name: str, run_name: str) -> bool:
         logger.debug(f"Run '{run_name}' does not exist in experiment '{experiment_name}'")
         return False
         
-    except Exception as exc:
+    except MlflowException as exc:
         logger.error(f"Error checking existing run: {exc}")
         return False
 
@@ -636,7 +635,7 @@ def ingest_run(run_dir: Path, skip_artifacts: bool = False, skip_duplicates: boo
                         logger.debug("Skipping classification_report.json artifact upload (--skip-artifacts flag)")
                     
                     logger.info("Classification report processed successfully")
-                except Exception as exc:
+                except (json.JSONDecodeError, OSError, KeyError) as exc:
                     logger.error(f"Error processing classification report: {exc}")
                     logger.error(f"Traceback: {traceback.format_exc()}")
 
@@ -656,7 +655,7 @@ def ingest_run(run_dir: Path, skip_artifacts: bool = False, skip_duplicates: boo
                         logger.debug("Skipping regression_report.json artifact upload (--skip-artifacts flag)")
                     
                     logger.info("Regression report processed successfully")
-                except Exception as exc:
+                except (json.JSONDecodeError, OSError, KeyError) as exc:
                     logger.error(f"Error processing regression report: {exc}")
                     logger.error(f"Traceback: {traceback.format_exc()}")
 
@@ -752,7 +751,6 @@ def ingest_run(run_dir: Path, skip_artifacts: bool = False, skip_duplicates: boo
                 if uploaded_linear_ica:
                     mlflow.set_tag("linear_ica_artifact_uploaded", str(uploaded_linear_ica))
                 
-                total_artifacts = len(valid_artifacts) + len(invalid_artifacts)
                 logger.info(f"Artifact upload summary: {uploaded_count}/{len(valid_artifacts)} valid artifacts uploaded successfully")
                 logger.info(f"Total artifacts discovered: {len(discovered_artifacts)} (valid: {len(valid_artifacts)}, invalid: {len(invalid_artifacts)})")
                 
@@ -782,7 +780,7 @@ def ingest_run(run_dir: Path, skip_artifacts: bool = False, skip_duplicates: boo
 def iter_dataset_dirs(include: Optional[Iterable[str]]) -> Iterable[Path]:
     """Yield dataset directories, optionally filtering by a provided list."""
     if not RESULTS_ROOT.exists():
-        return []
+        return
     include_set = {name.strip() for name in include} if include else None
     for dataset_dir in sorted(RESULTS_ROOT.iterdir()):
         if not dataset_dir.is_dir():

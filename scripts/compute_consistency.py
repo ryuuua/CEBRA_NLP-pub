@@ -124,21 +124,11 @@ def _resolve_embeddings(
     return embeddings, resolved_labels
 
 
-def main() -> None:
-    parser = _build_parser()
-    args = parser.parse_args()
-
-    if len(args.run_ids) < 2:
-        raise SystemExit("At least two run IDs are required to compute consistency.")
-
-    embeddings, labels = _resolve_embeddings(args.run_ids, args.results_root.resolve())
-
-    kwargs = {"embeddings": embeddings, "between": args.mode}
-    if args.mode == "datasets":
-        kwargs["dataset_ids"] = args.run_ids
-
-    scores, pairs, ids_runs = consistency_score(**kwargs)  # type: ignore[arg-type]
-
+def _compute_procrustes_metrics(
+    embeddings: List[np.ndarray],
+    labels: List[str],
+) -> List[Tuple[str, str, float, float]]:
+    """Compute Procrustes metrics for all pairs of embeddings."""
     procrustes_rows: List[Tuple[str, str, float, float]] = []
     for idx_a, idx_b in combinations(range(len(embeddings)), 2):
         label_a, label_b = labels[idx_a], labels[idx_b]
@@ -148,12 +138,32 @@ def main() -> None:
             print(f"[WARN] Skipping Procrustes metrics for {label_a} ↔ {label_b}: {exc}")
             continue
         procrustes_rows.append((label_a, label_b, rss, distance))
+    return procrustes_rows
+
+
+def main() -> None:
+    parser = _build_parser()
+    args = parser.parse_args()
+
+    if len(args.run_ids) < 2:
+        raise SystemExit("At least two run IDs are required to compute consistency.")
+
+    embeddings, labels = _resolve_embeddings(args.run_ids, args.results_root.resolve())
+
+    # Build consistency_score arguments
+    kwargs = {"embeddings": embeddings, "between": args.mode}
+    if args.mode == "datasets":
+        kwargs["dataset_ids"] = args.run_ids
+
+    scores, pairs, ids_runs = consistency_score(**kwargs)  # type: ignore[arg-type]
+
+    procrustes_rows = _compute_procrustes_metrics(embeddings, labels)
 
     print("\nPairwise consistency scores:")
     for pair, score in zip(pairs, scores):
         print(f"  {pair[0]} ↔ {pair[1]} : {float(score):.6f}")
 
-    mean_score = float(np.mean(scores)) if len(scores) else float("nan")
+    mean_score = float(np.mean(scores)) if len(scores) > 0 else float("nan")
     print(f"\nMean consistency score: {mean_score:.6f}")
 
     if procrustes_rows:
@@ -161,7 +171,7 @@ def main() -> None:
         for name_a, name_b, rss, distance in procrustes_rows:
             print(f"  {name_a} ↔ {name_b} : RSS={rss:.6f}, ProcrustesDist={distance:.6f}")
 
-    if args.json:
+    if args.json is not None:
         payload = {
             "mode": args.mode,
             "scores": scores.tolist(),

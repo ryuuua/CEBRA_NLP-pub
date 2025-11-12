@@ -14,7 +14,7 @@ from sklearn.exceptions import ConvergenceWarning
 try:
     # Optional: used for kurtosis (non-Gaussianity) summary
     from scipy.stats import kurtosis as scipy_kurtosis  # type: ignore
-except Exception:
+except ImportError:
     scipy_kurtosis = None  # scipy not available; we'll skip kurtosis table
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -29,14 +29,28 @@ from src.utils import apply_reproducibility  # noqa: E402
 def _determine_random_state(cfg, user_override: Optional[int]) -> Optional[int]:
     if user_override is not None:
         return user_override
-    cfg_seeds: Sequence[Optional[int]] = (
-        getattr(cfg.dataset, "shuffle_seed", None),
-        getattr(getattr(cfg, "evaluation", None), "random_state", None),
-    )
-    for candidate in cfg_seeds:
-        if candidate is not None:
-            return candidate
+    shuffle_seed = getattr(cfg.dataset, "shuffle_seed", None)
+    if shuffle_seed is not None:
+        return shuffle_seed
+    eval_cfg = getattr(cfg, "evaluation", None)
+    if eval_cfg is not None:
+        return getattr(eval_cfg, "random_state", None)
     return None
+
+
+def _resolve_components(n_components: Optional[int], max_components: int) -> int:
+    """Resolve the number of ICA components to use."""
+    if n_components is None:
+        requested = max_components
+    else:
+        requested = n_components
+    resolved = max(1, min(requested, max_components))
+    if resolved < requested:
+        print(
+            f"[INFO] Requested {requested} components but only "
+            f"{max_components} are feasible; using {resolved}."
+        )
+    return resolved
 
 
 def _apply_ica(
@@ -49,17 +63,7 @@ def _apply_ica(
     if max_components <= 0:
         raise ValueError("Embeddings array is empty; cannot apply ICA.")
 
-    if n_components is None:
-        requested = max_components
-    else:
-        requested = n_components
-    resolved_components = max(1, min(requested, max_components))
-
-    if resolved_components < requested:
-        print(
-            f"[INFO] Requested {requested} components but only "
-            f"{max_components} are feasible; using {resolved_components}."
-        )
+    resolved_components = _resolve_components(n_components, max_components)
 
     ica = FastICA(
         n_components=resolved_components,
@@ -80,8 +84,9 @@ def _compute_excess_kurtosis(transformed: np.ndarray) -> np.ndarray:
         try:
             vals = scipy_kurtosis(transformed, axis=0, fisher=True, bias=False)
             return np.asarray(vals, dtype=float)
-        except Exception:
-            pass
+        except (ValueError, RuntimeError) as exc:
+            print(f"[WARN] Failed to compute kurtosis with scipy: {exc}")
+            # Fall through to manual computation
 
     centered = transformed - transformed.mean(axis=0, keepdims=True)
     variance = np.mean(centered**2, axis=0)
@@ -104,7 +109,7 @@ def _compute_label_alignment(
         return None, None, None, {}
 
     label_array = np.asarray([str(label) for label in labels])
-    unique_labels = sorted(set(label_array.tolist()))
+    unique_labels = sorted(set(label_array))
     if not unique_labels:
         return None, None, None, {}
 
@@ -150,8 +155,7 @@ def _rank_components(
     if metric == "label_alignment" and label_alignment is not None:
         order = np.argsort(label_alignment)[::-1]
         return "label_alignment", order
-    if metric == "kurtosis":
-        pass  # fall through
+    
     # Fallback: use absolute kurtosis
     if kurtosis_vals.size == 0:
         return "kurtosis", np.array([], dtype=int)
@@ -238,8 +242,8 @@ def _save_kurtosis_table(
             return
         try:
             values = scipy_kurtosis(transformed, axis=0, fisher=True, bias=False)
-        except Exception as e:
-            print(f"[WARN] Failed to compute kurtosis: {e}")
+        except (ValueError, RuntimeError) as exc:
+            print(f"[WARN] Failed to compute kurtosis: {exc}")
             return
     data = {name: float(v) for name, v in zip(component_names, values)}
     with open(output_path, "w", encoding="utf-8") as f:
@@ -357,8 +361,7 @@ def _generate_ica_visualizations(
     texts, conditional_data, _time_indices, ids = viz_scripts.load_and_prepare_dataset(cfg)
 
     base_embeddings: Optional[np.ndarray] = None
-    embeddings_path = run_dir / "cebra_embeddings.npy"
-    if not embeddings_path.exists():
+    if not (run_dir / "cebra_embeddings.npy").exists():
         base_embeddings = viz_scripts._prepare_base_embeddings(cfg, ids, texts)
 
     cebra_embeddings = viz_scripts._load_cebra_embeddings(run_dir, cfg, base_embeddings)
@@ -385,12 +388,16 @@ def _generate_ica_visualizations(
     metric_used, ranking_order = _rank_components(
         kurtosis_vals, label_alignment_vals, metric=ranking_metric
     )
+    
+    # Warn if requested metric couldn't be used
     if ranking_metric.lower() == "label_alignment" and metric_used != "label_alignment":
         print(
             "[WARN] Label alignment ranking requested but labels are not discrete; "
             "falling back to kurtosis ranking."
         )
-    if ranking_order.size and top_k > 0:
+    
+    # Select top-k components if requested
+    if ranking_order.size > 0 and top_k > 0:
         limited_k = min(top_k, ranking_order.size)
         selected_indices = ranking_order[:limited_k]
     else:
@@ -412,7 +419,7 @@ def _generate_ica_visualizations(
         order=order,
     )
 
-    if selected_indices.size and label_means:
+    if selected_indices.size > 0 and label_means:
         topk_heatmap_path = viz_dir / f"cebra_ica_labels_top{selected_indices.size}_{metric_used}.png"
         _save_label_heatmap(
             label_means,
@@ -469,8 +476,8 @@ def _generate_ica_visualizations(
             }
         component_report.append(entry)
 
-    ranking_order_list = ranking_order.tolist() if ranking_order.size else []
-    selected_list = selected_indices.tolist() if selected_indices.size else []
+    ranking_order_list = ranking_order.tolist() if ranking_order.size > 0 else []
+    selected_list = selected_indices.tolist() if selected_indices.size > 0 else []
     report_payload = {
         "components": component_report,
         "metrics": {

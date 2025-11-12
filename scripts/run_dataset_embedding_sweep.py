@@ -105,6 +105,15 @@ def _resolve_embedding_config(name: str) -> str:
     return EMBEDDING_NAME_TO_CONFIG[name]
 
 
+def _setup_wandb_env() -> Dict[str, str]:
+    """Set up WANDB environment variables if not already configured."""
+    env = os.environ.copy()
+    # Set WANDB_MODE to offline if no WANDB configuration is present
+    if not any(key in env for key in ("WANDB_API_KEY", "WANDB_MODE", "WANDB_DISABLED")):
+        env["WANDB_MODE"] = "offline"
+    return env
+
+
 def main(argv: Sequence[str]) -> int:
     args = parse_args(argv)
 
@@ -115,13 +124,7 @@ def main(argv: Sequence[str]) -> int:
         print("[WARN] No embeddings specified; nothing to run.")
         return 0
 
-    env = os.environ.copy()
-    if (
-        "WANDB_API_KEY" not in env
-        and "WANDB_MODE" not in env
-        and "WANDB_DISABLED" not in env
-    ):
-        env["WANDB_MODE"] = "offline"
+    env = _setup_wandb_env()
 
     combos = list(itertools.product(args.datasets, args.embeddings))
     total = len(combos)

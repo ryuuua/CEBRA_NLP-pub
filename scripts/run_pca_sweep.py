@@ -47,7 +47,7 @@ EMBEDDING_NAME_TO_CONFIG: Dict[str, str] = {
 def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Sequentially run pca_embeddings.py across dataset × embedding combinations."
+            "Sequentially run tools/pca_embeddings.py across dataset × embedding combinations."
         )
     )
     parser.add_argument(
@@ -72,7 +72,7 @@ def parse_args(argv: Sequence[str]) -> argparse.Namespace:
     )
     parser.add_argument(
         "--pca-script",
-        default="pca_embeddings.py",
+        default="tools/pca_embeddings.py",
         help="Hydra entry point for PCA (default: %(default)s).",
     )
     parser.add_argument(
@@ -107,6 +107,15 @@ def _resolve_embedding_config(name: str) -> str:
     return EMBEDDING_NAME_TO_CONFIG[name]
 
 
+def _setup_wandb_env() -> Dict[str, str]:
+    """Set up WANDB environment variables if not already configured."""
+    env = os.environ.copy()
+    # Set WANDB_MODE to offline if no WANDB configuration is present
+    if not any(key in env for key in ("WANDB_API_KEY", "WANDB_MODE", "WANDB_DISABLED")):
+        env["WANDB_MODE"] = "offline"
+    return env
+
+
 def main(argv: Sequence[str]) -> int:
     args = parse_args(argv)
 
@@ -117,13 +126,7 @@ def main(argv: Sequence[str]) -> int:
         print("[WARN] No embeddings specified; nothing to run.")
         return 0
 
-    env = os.environ.copy()
-    if (
-        "WANDB_API_KEY" not in env
-        and "WANDB_MODE" not in env
-        and "WANDB_DISABLED" not in env
-    ):
-        env["WANDB_MODE"] = "offline"
+    env = _setup_wandb_env()
 
     embeddings_with_index = list(enumerate(args.embeddings))
     combos = list(itertools.product(args.datasets, embeddings_with_index))
