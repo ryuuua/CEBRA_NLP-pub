@@ -1,6 +1,9 @@
 import argparse
+import multiprocessing
 import sys
+import traceback
 from pathlib import Path
+from queue import Empty
 from typing import Dict, Iterable, List, Literal, Optional, Set, Tuple
 
 import numpy as np
@@ -55,11 +58,12 @@ def _resolve_device(requested: Optional[str]) -> str:
         try:
             _, idx_str = normalized.split(":", 1)
             idx = int(idx_str)
-        except (ValueError, IndexError) as exc:
+        except ValueError as exc:
             raise ValueError(f"Invalid CUDA device specification: '{requested}'.") from exc
-        if idx < 0 or idx >= torch.cuda.device_count():
+        device_count = torch.cuda.device_count()
+        if idx < 0 or idx >= device_count:
             raise ValueError(
-                f"CUDA device index {idx} is out of range. Available GPUs: {torch.cuda.device_count()}."
+                f"CUDA device index {idx} is out of range. Available GPUs: {device_count}."
             )
         return f"cuda:{idx}"
     raise ValueError(f"Unsupported device specification '{requested}'.")
@@ -81,12 +85,11 @@ def _load_cfg(run_dir: Path, *, device_override: Optional[str] = None) -> AppCon
     cfg.cebra.model_architecture = normalize_model_architecture(
         getattr(cfg.cebra, "model_architecture", "offset0-model")
     )
-    
-    # Resolve device
-    if device_override is not None:
-        cfg.device = _resolve_device(device_override)
-    else:
-        cfg.device = "cuda" if torch.cuda.is_available() else "cpu"
+    cfg.device = (
+        _resolve_device(device_override)
+        if device_override is not None
+        else ("cuda" if torch.cuda.is_available() else "cpu")
+    )
 
     return cfg
 
@@ -146,26 +149,15 @@ def _resolve_visualization_paths(
     return viz_dir, interactive_path, expected_static, conditional_desc
 
 
-def _resolve_shuffle_seed(cfg: AppConfig) -> Optional[int]:
-    """Resolve shuffle seed from configuration."""
-    shuffle_seed = getattr(cfg.dataset, "shuffle_seed", None)
-    if shuffle_seed is not None:
-        return shuffle_seed
-    eval_cfg = getattr(cfg, "evaluation", None)
-    if eval_cfg is not None:
-        return getattr(eval_cfg, "random_state", None)
-    return None
-
-
 def _prepare_base_embeddings(cfg: AppConfig, ids: Iterable, texts: List[str]) -> np.ndarray:
     """Reuse cached embeddings when possible, otherwise recompute."""
     cache_path = get_embedding_cache_path(cfg)
     cache = load_text_embedding(cache_path)
     if cache is not None:
         cached_ids, cached_embeddings, cached_seed, cached_layer_embeddings = cache
+        id_to_index = {str(i): idx for idx, i in enumerate(cached_ids)}
         # Convert ids to strings once for efficient lookup
         str_ids = [str(i) for i in ids]
-        id_to_index = {str(cached_id): idx for idx, cached_id in enumerate(cached_ids)}
         try:
             selection_indices = np.asarray(
                 [id_to_index[sid] for sid in str_ids], dtype=int
@@ -175,9 +167,10 @@ def _prepare_base_embeddings(cfg: AppConfig, ids: Iterable, texts: List[str]) ->
 
         if selection_indices is not None:
             if cfg.embedding.type == "hf_transformer" and cached_layer_embeddings is not None:
+                hidden_state_layer = getattr(cfg.embedding, "hidden_state_layer", None)
                 layer_idx = resolve_layer_index(
                     cached_layer_embeddings.shape[1],
-                    getattr(cfg.embedding, "hidden_state_layer", None),
+                    hidden_state_layer,
                 )
                 return cached_layer_embeddings[selection_indices, layer_idx, :]
             return np.asarray(cached_embeddings[selection_indices])
@@ -187,7 +180,12 @@ def _prepare_base_embeddings(cfg: AppConfig, ids: Iterable, texts: List[str]) ->
     layer_cache = get_last_hidden_state_cache()
     if layer_cache is not None and layer_cache.shape[0] != embeddings.shape[0]:
         layer_cache = None  # fallback if cache mismatched
-    seed = _resolve_shuffle_seed(cfg)
+    shuffle_seed = getattr(cfg.dataset, "shuffle_seed", None)
+    seed = (
+        shuffle_seed
+        if shuffle_seed is not None
+        else getattr(getattr(cfg, "evaluation", None), "random_state", None)
+    )
     save_text_embedding(
         ids,
         embeddings,
@@ -205,8 +203,10 @@ def _load_cebra_embeddings(
     base_embeddings: Optional[np.ndarray],
     *,
     batch_size: int = 4096,
+    embeddings_path: Optional[Path] = None,
 ) -> Optional[np.ndarray]:
-    embeddings_path = run_dir / "cebra_embeddings.npy"
+    if embeddings_path is None:
+        embeddings_path = run_dir / "cebra_embeddings.npy"
     if embeddings_path.exists():
         return np.load(embeddings_path)
 
@@ -296,7 +296,8 @@ def _generate_visualizations(
 
     # Use stored embeddings when present; otherwise rebuild from scratch.
     base_embeddings: Optional[np.ndarray] = None
-    if not (run_dir / "cebra_embeddings.npy").exists():
+    embeddings_path = run_dir / "cebra_embeddings.npy"
+    if not embeddings_path.exists():
         base_embeddings = _prepare_base_embeddings(cfg, ids, texts)
 
     cebra_embeddings = _load_cebra_embeddings(
@@ -304,6 +305,7 @@ def _generate_visualizations(
         cfg,
         base_embeddings,
         batch_size=cebra_batch_size,
+        embeddings_path=embeddings_path,
     )
     if cebra_embeddings is None:
         return "missing_artifacts"
@@ -322,11 +324,12 @@ def _generate_visualizations(
 
     if cfg.cebra.conditional == "discrete":
         hue_order = order if order else sorted(set(labels))
+        title_prefix = f"{cfg.dataset.name} ({run_id})"
         save_static_2d_plots(
             embeddings=cebra_embeddings,
             text_labels=labels,
             palette=palette,
-            title_prefix=f"{cfg.dataset.name} ({run_id})",
+            title_prefix=title_prefix,
             output_dir=viz_dir,
             hue_order=hue_order,
             cfg=cfg,
@@ -336,6 +339,85 @@ def _generate_visualizations(
     return "generated"
 
 
+def _visualization_worker(
+    queue,
+    run_dir: Path,
+    run_id: str,
+    force: bool,
+    device_override: Optional[str],
+    cebra_batch_size: int,
+) -> None:
+    """Execute visualization generation in a worker process and report status."""
+    try:
+        status = _generate_visualizations(
+            run_dir,
+            run_id,
+            force=force,
+            device_override=device_override,
+            cebra_batch_size=cebra_batch_size,
+        )
+        queue.put(("ok", status))
+    except Exception:
+        queue.put(("error", traceback.format_exc()))
+
+
+def _run_visualizations_with_optional_timeout(
+    run_dir: Path,
+    run_id: str,
+    *,
+    force: bool,
+    device_override: Optional[str],
+    cebra_batch_size: int,
+    timeout_seconds: Optional[float],
+) -> Literal["generated", "skipped_existing", "missing_artifacts", "timeout"]:
+    """Run visualization generation with an optional timeout safeguard."""
+    if timeout_seconds is None or timeout_seconds <= 0:
+        return _generate_visualizations(
+            run_dir,
+            run_id,
+            force=force,
+            device_override=device_override,
+            cebra_batch_size=cebra_batch_size,
+        )
+
+    ctx = multiprocessing.get_context("spawn")
+    result_queue = ctx.Queue()
+    proc = ctx.Process(
+        target=_visualization_worker,
+        args=(result_queue, run_dir, run_id, force, device_override, cebra_batch_size),
+        daemon=False,
+    )
+    proc.start()
+    try:
+        proc.join(timeout_seconds)
+        if proc.is_alive():
+            proc.terminate()
+            proc.join()
+            print(
+                f"[WARN] Run {run_id} exceeded timeout ({timeout_seconds:.1f}s); "
+                "terminated visualization process."
+            )
+            return "timeout"
+        try:
+            status_type, payload = result_queue.get(timeout=5)
+        except Empty as exc:
+            raise RuntimeError(
+                f"Visualization worker for run {run_id} exited without reporting status."
+            ) from exc
+        if status_type == "error":
+            raise RuntimeError(
+                f"Visualization worker for run {run_id} failed:\n{payload}"
+            )
+        return payload
+    except KeyboardInterrupt:
+        proc.terminate()
+        proc.join()
+        raise
+    finally:
+        result_queue.close()
+        result_queue.join_thread()
+
+
 def _drive(
     run_ids: List[str],
     results_root: Path,
@@ -343,6 +425,7 @@ def _drive(
     force: bool = False,
     device: Optional[str] = None,
     cebra_batch_size: int,
+    timeout_seconds: Optional[float],
 ) -> None:
     scheduled: List[Tuple[str, Path]] = []
     missing = 0
@@ -364,22 +447,29 @@ def _drive(
         return
 
     total = len(scheduled)
-    stats: Dict[str, int] = {"generated": 0, "skipped_existing": 0, "missing_artifacts": 0}
+    stats: Dict[str, int] = {
+        "generated": 0,
+        "skipped_existing": 0,
+        "missing_artifacts": 0,
+        "timeout": 0,
+    }
     for idx, (run_id, run_dir) in enumerate(scheduled, start=1):
         print(f"[PROGRESS] ({idx}/{total}) run_id={run_id}")
-        status = _generate_visualizations(
+        status = _run_visualizations_with_optional_timeout(
             run_dir,
             run_id,
             force=force,
             device_override=device,
             cebra_batch_size=cebra_batch_size,
+            timeout_seconds=timeout_seconds,
         )
         stats[status] += 1
 
     summary = (
         f"[SUMMARY] Requested {len(run_ids)} run ID(s) · matched {total} run folder(s) · "
         f"{missing} missing · generated {stats['generated']} · "
-        f"skipped {stats['skipped_existing']} · missing artifacts {stats['missing_artifacts']}"
+        f"skipped {stats['skipped_existing']} · missing artifacts {stats['missing_artifacts']} · "
+        f"timed out {stats['timeout']}"
     )
     print(summary)
 
@@ -420,6 +510,12 @@ def main() -> None:
         default=4096,
         help="Mini-batch size for GPU inference when rebuilding CEBRA embeddings.",
     )
+    parser.add_argument(
+        "--timeout-seconds",
+        type=float,
+        default=None,
+        help="Maximum seconds to spend on each run before aborting (0 disables the timeout).",
+    )
     args = parser.parse_args()
 
     try:
@@ -435,12 +531,17 @@ def main() -> None:
     except ValueError as exc:
         parser.error(str(exc))
 
+    timeout_seconds = args.timeout_seconds
+    if timeout_seconds is not None and timeout_seconds <= 0:
+        timeout_seconds = None
+
     _drive(
         resolved_run_ids,
         args.results_root.resolve(),
         force=args.force,
         device=device,
         cebra_batch_size=args.cebra_batch_size,
+        timeout_seconds=timeout_seconds,
     )
 
 
