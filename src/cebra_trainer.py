@@ -163,9 +163,16 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
             label_tensor = label_tensor.to(cfg.device)
             
             prior_type = cfg.cebra.params.get("prior", "uniform")
-            if prior_type == "uniform":
-                dist = DiscreteUniform(label_tensor, device=cfg.device)
+            # Dictionary-based dispatch for prior type selection
+            prior_dispatchers = {
+                "uniform": lambda: DiscreteUniform(label_tensor, device=cfg.device),
+                "empirical": lambda: DiscreteEmpirical(label_tensor, device=cfg.device),
+            }
+            prior_dispatcher = prior_dispatchers.get(prior_type)
+            if prior_dispatcher is not None:
+                dist = prior_dispatcher()
             else:
+                # Default to empirical for unknown prior types
                 dist = DiscreteEmpirical(label_tensor, device=cfg.device)
 
     loader = None

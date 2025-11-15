@@ -749,7 +749,6 @@ def run_consistency_check(
             ax = plot_consistency(scores, pairs, ids_runs)
             plot_path = output_dir / f"consistency_plot_{name}.png"
 
-            # Axesオブジェクト(ax)の親であるFigureオブジェクト(ax.figure)に対してsavefigを実行
             ax.figure.savefig(plot_path)
 
             # Figureを閉じる

@@ -89,78 +89,109 @@ def _load_20newsgroups_from_source(dataset_cfg, splits: List[str]) -> List[pd.Da
     return frames
 
 
+def _load_hf_dataset(dataset_cfg) -> pd.DataFrame:
+    """Load dataset from Hugging Face."""
+    load_kwargs = {}
+    if getattr(dataset_cfg, "trust_remote_code", False):
+        load_kwargs["trust_remote_code"] = True
+
+    try:
+        if dataset_cfg.splits:
+            datasets = [
+                load_dataset(
+                    dataset_cfg.hf_path,
+                    split=split,
+                    **load_kwargs,
+                )
+                for split in dataset_cfg.splits
+            ]
+        else:
+            dataset = load_dataset(
+                dataset_cfg.hf_path,
+                **load_kwargs,
+            )
+            dataset_keys = dataset.keys()
+            datasets = [dataset[split] for split in dataset_keys]
+    except (RuntimeError, ValueError) as err:
+        if dataset_cfg.hf_path == "trec" and _should_use_trec_fallback(err):
+            print("Falling back to manual download for the TREC dataset.")
+            datasets = _load_trec_from_source(dataset_cfg, dataset_cfg.splits)
+        else:
+            raise
+    all_splits = [pd.DataFrame(d) for d in datasets]
+    return pd.concat(all_splits, ignore_index=True)
+
+
+def _load_csv_dataset(dataset_cfg) -> pd.DataFrame:
+    """Load dataset from CSV files."""
+    dataset = load_dataset("csv", data_files=dataset_cfg.data_files)
+    dataset_keys = dataset.keys()
+    all_splits = [pd.DataFrame(dataset[split]) for split in dataset_keys]
+    return pd.concat(all_splits, ignore_index=True)
+
+
+def _load_kaggle_dataset(dataset_cfg) -> pd.DataFrame:
+    """Load dataset from Kaggle."""
+    if not dataset_cfg.kaggle_handle:
+        raise ValueError(
+            "dataset.kaggle_handle must be set when dataset.source is 'kaggle'"
+        )
+    
+    path = kagglehub.dataset_download(dataset_cfg.kaggle_handle)
+    
+    # Determine CSV file path: use specified file or find first CSV file
+    if dataset_cfg.data_files:
+        csv_path = os.path.join(path, dataset_cfg.data_files)
+        if not os.path.exists(csv_path):
+            raise FileNotFoundError(
+                f"Specified data file not found in Kaggle dataset directory: {csv_path}"
+            )
+    else:
+        all_files = os.listdir(path)
+        csv_files = [f for f in all_files if f.endswith(".csv")]
+        if not csv_files:
+            raise FileNotFoundError("No CSV files found in Kaggle dataset directory")
+        csv_path = os.path.join(path, csv_files[0])
+
+    return pd.read_csv(csv_path)
+
+
+def _load_sklearn_dataset(dataset_cfg) -> pd.DataFrame:
+    """Load dataset from scikit-learn."""
+    # Dictionary-based dispatch for sklearn dataset selection
+    sklearn_dataset_dispatchers = {
+        "20newsgroups": lambda: pd.concat(
+            _load_20newsgroups_from_source(dataset_cfg, dataset_cfg.splits),
+            ignore_index=True
+        ),
+    }
+    
+    dispatcher = sklearn_dataset_dispatchers.get(dataset_cfg.sklearn_dataset)
+    if dispatcher is not None:
+        return dispatcher()
+    else:
+        raise ValueError(
+            f"Unsupported sklearn_dataset: {dataset_cfg.sklearn_dataset}."
+        )
+
+
 def load_and_prepare_dataset(cfg: "AppConfig"):
     """Load dataset and prepare texts, conditional data, time indices and IDs."""
     dataset_cfg = cfg.dataset
     conditional_mode = getattr(cfg.cebra, "conditional", "none").lower()
     print(f"Loading dataset: {dataset_cfg.name}")
 
-    if dataset_cfg.source == "hf":
-        load_kwargs = {}
-        if getattr(dataset_cfg, "trust_remote_code", False):
-            load_kwargs["trust_remote_code"] = True
-
-        try:
-            if dataset_cfg.splits:
-                datasets = [
-                    load_dataset(
-                        dataset_cfg.hf_path,
-                        split=split,
-                        **load_kwargs,
-                    )
-                    for split in dataset_cfg.splits
-                ]
-            else:
-                dataset = load_dataset(
-                    dataset_cfg.hf_path,
-                    **load_kwargs,
-                )
-                dataset_keys = dataset.keys()
-                datasets = [dataset[split] for split in dataset_keys]
-        except (RuntimeError, ValueError) as err:
-            if dataset_cfg.hf_path == "trec" and _should_use_trec_fallback(err):
-                print("Falling back to manual download for the TREC dataset.")
-                datasets = _load_trec_from_source(dataset_cfg, dataset_cfg.splits)
-            else:
-                raise
-        all_splits = [pd.DataFrame(d) for d in datasets]
-        df = pd.concat(all_splits, ignore_index=True)
-    elif dataset_cfg.source == "csv":
-        dataset = load_dataset("csv", data_files=dataset_cfg.data_files)
-        dataset_keys = dataset.keys()
-        all_splits = [pd.DataFrame(dataset[split]) for split in dataset_keys]
-        df = pd.concat(all_splits, ignore_index=True)
-    elif dataset_cfg.source == "kaggle":
-        if not dataset_cfg.kaggle_handle:
-            raise ValueError(
-                "dataset.kaggle_handle must be set when dataset.source is 'kaggle'"
-            )
-        
-        path = kagglehub.dataset_download(dataset_cfg.kaggle_handle)
-        
-        # Determine CSV file path: use specified file or find first CSV file
-        if dataset_cfg.data_files:
-            csv_path = os.path.join(path, dataset_cfg.data_files)
-            if not os.path.exists(csv_path):
-                raise FileNotFoundError(
-                    f"Specified data file not found in Kaggle dataset directory: {csv_path}"
-                )
-        else:
-            all_files = os.listdir(path)
-            csv_files = [f for f in all_files if f.endswith(".csv")]
-            if not csv_files:
-                raise FileNotFoundError("No CSV files found in Kaggle dataset directory")
-            csv_path = os.path.join(path, csv_files[0])
-
-        df = pd.read_csv(csv_path)
-    elif dataset_cfg.source == "sklearn":
-        if dataset_cfg.sklearn_dataset == "20newsgroups":
-            datasets = _load_20newsgroups_from_source(dataset_cfg, dataset_cfg.splits)
-            df = pd.concat(datasets, ignore_index=True)
-        else:
-            raise ValueError(
-                f"Unsupported sklearn_dataset: {dataset_cfg.sklearn_dataset}."
-            )
+    # Dictionary-based dispatch for dataset source selection
+    dataset_source_dispatchers = {
+        "hf": lambda: _load_hf_dataset(dataset_cfg),
+        "csv": lambda: _load_csv_dataset(dataset_cfg),
+        "kaggle": lambda: _load_kaggle_dataset(dataset_cfg),
+        "sklearn": lambda: _load_sklearn_dataset(dataset_cfg),
+    }
+    
+    dispatcher = dataset_source_dispatchers.get(dataset_cfg.source)
+    if dispatcher is not None:
+        df = dispatcher()
     else:
         raise ValueError(
             "Unsupported dataset source: "

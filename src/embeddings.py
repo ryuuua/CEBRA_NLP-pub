@@ -248,21 +248,24 @@ def get_embeddings(texts: list, cfg: AppConfig) -> np.ndarray:
     emb_cfg = cfg.embedding
     print(f"\n--- Generating embeddings using model: {emb_cfg.name} ---")
 
-    if emb_cfg.type == "hf_transformer":
-        # AppConfigとして扱われることで、cfg.deviceに正しくアクセスできる
-        return get_hf_transformer_embeddings(
+    # Dictionary-based dispatch for embedding type selection
+    embedding_dispatchers = {
+        "hf_transformer": lambda: get_hf_transformer_embeddings(
             texts,
             emb_cfg.model_name,
             cfg.device,
             layer_index=emb_cfg.hidden_state_layer,
             trust_remote_code=emb_cfg.trust_remote_code,
-        )
-    elif emb_cfg.type == "sentence_transformer":
-        return get_sentence_transformer_embeddings(
+        ),
+        "sentence_transformer": lambda: get_sentence_transformer_embeddings(
             texts, emb_cfg.model_name, cfg.device
-        )
-    elif emb_cfg.type == "word2vec":
-        return get_word2vec_embeddings(texts, emb_cfg, cfg)
+        ),
+        "word2vec": lambda: get_word2vec_embeddings(texts, emb_cfg, cfg),
+    }
+
+    dispatcher = embedding_dispatchers.get(emb_cfg.type)
+    if dispatcher is not None:
+        return dispatcher()
     else:
         raise ValueError(f"Unknown embedding type: {emb_cfg.type}")
 
