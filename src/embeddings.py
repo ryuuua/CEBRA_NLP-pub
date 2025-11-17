@@ -7,6 +7,8 @@ from src.utils import (
     get_embedding_cache_path,
     load_text_embedding,
     save_text_embedding,
+    resolve_shuffle_seed,
+    build_id_index_map,
 )
 
 from typing import Optional, Sequence, List
@@ -15,7 +17,7 @@ _LAST_LAYER_CACHE: Optional[np.ndarray] = None
 
 
 def get_last_hidden_state_cache() -> Optional[np.ndarray]:
-    """Return the cached mean-pooled hidden states for all layers from the most recent transformer run."""
+    """Return the cached pooled hidden states for all layers from the most recent transformer run."""
     return _LAST_LAYER_CACHE
 
 
@@ -30,6 +32,42 @@ def _mean_pool(hidden_state: torch.Tensor, attention_mask: torch.Tensor) -> torc
     summed = (hidden_state * mask).sum(dim=1)
     counts = mask.sum(dim=1).clamp(min=1e-9)
     return summed / counts
+
+
+def _ensure_tokenizer_pad_token(tokenizer) -> None:
+    """Ensure the tokenizer has a pad token, falling back to common special tokens."""
+    if getattr(tokenizer, "pad_token", None) is not None:
+        return
+    for attr in ("eos_token", "sep_token", "cls_token", "bos_token"):
+        fallback_token = getattr(tokenizer, attr, None)
+        if fallback_token is None:
+            continue
+        tokenizer.pad_token = fallback_token
+        if getattr(tokenizer, "pad_token_id", None) is None and hasattr(
+            tokenizer, "convert_tokens_to_ids"
+        ):
+            pad_token_id = tokenizer.convert_tokens_to_ids(fallback_token)
+            if pad_token_id is not None:
+                tokenizer.pad_token_id = pad_token_id
+        return
+
+
+def _pool_hidden_state(
+    hidden_state: torch.Tensor,
+    attention_mask: torch.Tensor,
+    pooling: str = "mean",
+) -> torch.Tensor:
+    """Pool a hidden state tensor according to the requested strategy."""
+    method = (pooling or "mean").lower()
+    if method == "mean":
+        pooled = _mean_pool(hidden_state, attention_mask)
+    elif method == "cls":
+        pooled = hidden_state[:, 0, :]
+    else:
+        raise ValueError(
+            f"Unsupported pooling method '{pooling}'. Expected 'mean' or 'cls'."
+        )
+    return pooled.to(dtype=torch.float32)
 
 
 def _select_layer(
@@ -79,6 +117,7 @@ def get_hf_transformer_embeddings(
     *,
     layer_index: Optional[int] = None,
     trust_remote_code: bool = False,
+    pooling: str = "mean",
 ):
     """Generates embeddings using a Hugging Face Transformer."""
     from transformers import AutoTokenizer, AutoModel
@@ -103,19 +142,7 @@ def get_hf_transformer_embeddings(
     except (GatedRepoError, OSError) as exc:
         _raise_access_error(exc)
 
-    # Set pad_token if missing
-    if getattr(tokenizer, "pad_token", None) is None:
-        for attr in ("eos_token", "sep_token", "cls_token", "bos_token"):
-            fallback_token = getattr(tokenizer, attr, None)
-            if fallback_token is not None:
-                tokenizer.pad_token = fallback_token
-                if getattr(tokenizer, "pad_token_id", None) is None and hasattr(
-                    tokenizer, "convert_tokens_to_ids"
-                ):
-                    pad_token_id = tokenizer.convert_tokens_to_ids(fallback_token)
-                    if pad_token_id is not None:
-                        tokenizer.pad_token_id = pad_token_id
-                break
+    _ensure_tokenizer_pad_token(tokenizer)
 
     try:
         model = AutoModel.from_pretrained(
@@ -151,8 +178,8 @@ def get_hf_transformer_embeddings(
                     )
                 hidden_state = _select_layer(hidden_states, layer_index, model_name)
 
-            pooled_selected = _mean_pool(hidden_state, attention_mask).to(
-                dtype=torch.float32
+            pooled_selected = _pool_hidden_state(
+                hidden_state, attention_mask, pooling=pooling
             )
             batch_embeddings = pooled_selected.cpu().numpy()
             embeddings.append(batch_embeddings)
@@ -162,8 +189,8 @@ def get_hf_transformer_embeddings(
                 if layer_accumulator is None:
                     layer_accumulator = [[] for _ in range(len(hidden_states))]
                 for idx, state in enumerate(hidden_states):
-                    pooled_tensor = _mean_pool(state, attention_mask).to(
-                        dtype=torch.float32
+                    pooled_tensor = _pool_hidden_state(
+                        state, attention_mask, pooling=pooling
                     )
                     pooled = pooled_tensor.cpu().numpy()
                     layer_accumulator[idx].append(pooled)
@@ -202,14 +229,12 @@ def get_word2vec_embeddings(texts, w2v_params, cfg: Optional[AppConfig] = None):
     seed = None
     if cfg is not None:
         reproducibility = getattr(cfg, "reproducibility", None)
-        if reproducibility is not None:
-            deterministic = bool(getattr(reproducibility, "deterministic", False))
-            if deterministic:
-                seed = getattr(reproducibility, "seed", None)
-                if seed is None:
-                    eval_cfg = getattr(cfg, "evaluation", None)
-                    if eval_cfg is not None:
-                        seed = getattr(eval_cfg, "random_state", None)
+        if reproducibility and getattr(reproducibility, "deterministic", False):
+            seed = getattr(reproducibility, "seed", None)
+            if seed is None:
+                eval_cfg = getattr(cfg, "evaluation", None)
+                if eval_cfg is not None:
+                    seed = getattr(eval_cfg, "random_state", None)
 
     workers = getattr(w2v_params, "workers", 4)
     deterministic = seed is not None
@@ -256,6 +281,7 @@ def get_embeddings(texts: list, cfg: AppConfig) -> np.ndarray:
             cfg.device,
             layer_index=emb_cfg.hidden_state_layer,
             trust_remote_code=emb_cfg.trust_remote_code,
+            pooling=getattr(emb_cfg, "pooling", "mean"),
         ),
         "sentence_transformer": lambda: get_sentence_transformer_embeddings(
             texts, emb_cfg.model_name, cfg.device
@@ -264,20 +290,20 @@ def get_embeddings(texts: list, cfg: AppConfig) -> np.ndarray:
     }
 
     dispatcher = embedding_dispatchers.get(emb_cfg.type)
-    if dispatcher is not None:
-        return dispatcher()
-    else:
+    if dispatcher is None:
         raise ValueError(f"Unknown embedding type: {emb_cfg.type}")
+    return dispatcher()
 
 
-def _resolve_shuffle_seed(cfg: AppConfig) -> Optional[int]:
-    dataset_seed = getattr(cfg.dataset, "shuffle_seed", None)
-    if dataset_seed is not None:
-        return dataset_seed
-    eval_cfg = getattr(cfg, "evaluation", None)
-    if eval_cfg is not None:
-        return getattr(eval_cfg, "random_state", None)
-    return None
+def _has_pooling_mismatch(
+    embedding_type: str, desired_pooling: Optional[str], cached_pooling: Optional[str]
+) -> bool:
+    """Check whether cached embeddings use a different pooling strategy."""
+    expected = desired_pooling or "mean"
+    if embedding_type != "hf_transformer":
+        return cached_pooling is not None and cached_pooling != expected
+    cached = "mean" if cached_pooling is None else str(cached_pooling or "mean").lower()
+    return cached != expected.lower()
 
 
 def load_or_generate_embeddings(
@@ -288,43 +314,55 @@ def load_or_generate_embeddings(
     """
     embedding_cache_path = get_embedding_cache_path(cfg)
     cache = load_text_embedding(embedding_cache_path)
-    resolved_seed = _resolve_shuffle_seed(cfg)
+    resolved_seed = resolve_shuffle_seed(cfg)
+    desired_pooling = getattr(cfg.embedding, "pooling", "mean")
 
-    # Try to load from cache
     if cache is not None:
-        cached_ids, cached_embeddings, cached_seed, cached_layer_embeddings = cache
-        if cached_seed == resolved_seed:
-            # Convert ids to strings once for efficient lookup
-            str_ids = [str(i) for i in ids]
-            id_to_index = {str(cached_id): idx for idx, cached_id in enumerate(cached_ids)}
-            try:
-                selection_indices = np.asarray(
+        (
+            cached_ids,
+            cached_embeddings,
+            cached_seed,
+            cached_layer_embeddings,
+            cached_pooling_method,
+        ) = cache
+
+        if _has_pooling_mismatch(
+            cfg.embedding.type, desired_pooling, cached_pooling_method
+        ):
+            print(
+                "Cached embeddings use a different pooling strategy. Recomputing with "
+                f"'{desired_pooling}' pooling..."
+            )
+        elif cached_seed != resolved_seed:
+            print("Cached embeddings shuffle seed mismatch. Recomputing...")
+        else:
+            str_ids, id_to_index = build_id_index_map(ids, cached_ids)
+            missing_ids = [sid for sid in str_ids if sid not in id_to_index]
+            if missing_ids:
+                print("Cached embeddings are missing required ids. Recomputing...")
+            else:
+                selection_indices = np.array(
                     [id_to_index[sid] for sid in str_ids], dtype=int
                 )
                 if (
                     cfg.embedding.type == "hf_transformer"
                     and cached_layer_embeddings is not None
                 ):
-                    target_layer = resolve_layer_index(
-                        cached_layer_embeddings.shape[1],
-                        getattr(cfg.embedding, "hidden_state_layer", None),
-                    )
-                    return cached_layer_embeddings[
-                        selection_indices, target_layer, :
-                    ]
-                else:
-                    cached = np.asarray(cached_embeddings)
-                    return cached[selection_indices]
-            except (KeyError, ValueError) as exc:
-                if isinstance(exc, KeyError):
-                    print("Cached embeddings are missing required ids. Recomputing...")
-                else:
-                    print(f"{exc} Recomputing embeddings...")
-        else:
-            print("Cached embeddings shuffle seed mismatch. Recomputing...")
+                    try:
+                        target_layer = resolve_layer_index(
+                            cached_layer_embeddings.shape[1],
+                            getattr(cfg.embedding, "hidden_state_layer", None),
+                        )
+                    except ValueError as exc:
+                        print(f"{exc} Recomputing embeddings...")
+                    else:
+                        return cached_layer_embeddings[
+                            selection_indices, target_layer, :
+                        ]
+                return np.asarray(cached_embeddings)[selection_indices]
 
     # Generate new embeddings
-    X_vectors = get_embeddings(list(texts), cfg)
+    X_vectors = get_embeddings(texts, cfg)
     layer_cache = get_last_hidden_state_cache()
     save_text_embedding(
         ids,
@@ -332,6 +370,9 @@ def load_or_generate_embeddings(
         resolved_seed,
         embedding_cache_path,
         layer_embeddings=layer_cache,
+        pooling_method=desired_pooling
+        if cfg.embedding.type == "hf_transformer"
+        else None,
     )
     clear_last_hidden_state_cache()
 

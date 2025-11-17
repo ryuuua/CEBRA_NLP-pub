@@ -25,6 +25,7 @@ import tempfile
 import wandb
 from tqdm import tqdm
 from .config_schema import AppConfig
+from .utils import should_log_to_wandb
 from cebra.integrations.sklearn.metrics import consistency_score
 from cebra import plot_consistency
 from sklearn.neighbors import KNeighborsRegressor
@@ -173,12 +174,19 @@ def _faiss_weighted_classification(
 ) -> np.ndarray:
     """Compute weighted majority votes given neighbor labels and weights."""
     label_to_pos = {int(label): idx for idx, label in enumerate(all_labels)}
-    num_queries, _ = neighbor_labels.shape
-    scores = np.zeros((num_queries, len(all_labels)), dtype=np.float64)
-
-    for row in range(num_queries):
-        label_indices = [label_to_pos[int(lbl)] for lbl in neighbor_labels[row]]
-        np.add.at(scores[row], label_indices, weights[row])
+    num_queries, k_neighbors = neighbor_labels.shape
+    num_classes = len(all_labels)
+    
+    # Vectorized: convert neighbor_labels to position indices
+    label_positions = np.array([
+        [label_to_pos[int(lbl)] for lbl in neighbor_labels[row]]
+        for row in range(num_queries)
+    ], dtype=np.int64)
+    
+    # Use advanced indexing for vectorized accumulation
+    scores = np.zeros((num_queries, num_classes), dtype=np.float64)
+    query_indices = np.arange(num_queries)[:, None].repeat(k_neighbors, axis=1)
+    np.add.at(scores, (query_indices, label_positions), weights)
 
     predicted_indices = scores.argmax(axis=1)
     return all_labels[predicted_indices]
@@ -403,7 +411,7 @@ def save_static_2d_plots(
     )
 
     if log_to_wandb is None:
-        log_to_wandb = wandb.run is not None
+        log_to_wandb = should_log_to_wandb()
 
     if log_to_wandb:
         wandb.log(
@@ -648,7 +656,7 @@ def run_consistency_check(
     check_cfg = cfg.consistency_check
 
     if log_to_wandb is None:
-        log_to_wandb = wandb.run is not None
+        log_to_wandb = should_log_to_wandb()
 
     # Between-datasets consistency
     if check_cfg.mode == "datasets":

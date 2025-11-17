@@ -17,18 +17,7 @@ from typing import Iterable, List, Tuple
 
 import numpy as np
 from cebra.integrations.sklearn.metrics import consistency_score
-
-
-def _find_run_dirs(results_root: Path, run_id: str) -> List[Path]:
-    """Locate run directories whose wandb_run_id.txt matches ``run_id``."""
-    matches: List[Path] = []
-    for marker in results_root.rglob("wandb_run_id.txt"):
-        try:
-            if marker.read_text().strip() == run_id:
-                matches.append(marker.parent)
-        except OSError:
-            continue
-    return sorted(matches)
+from src.utils import find_run_dirs
 
 
 def _pick_run_dir(matches: List[Path]) -> Path:
@@ -110,7 +99,7 @@ def _resolve_embeddings(
     resolved_labels: List[str] = []
 
     for run_id in run_ids:
-        matches = _find_run_dirs(results_root, run_id)
+        matches = find_run_dirs(results_root, run_id)
         if not matches:
             raise FileNotFoundError(
                 f"No directories under {results_root} contain wandb_run_id.txt == {run_id}"

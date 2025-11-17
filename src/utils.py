@@ -1,13 +1,13 @@
 import random
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional, Sequence, Dict, Tuple, List
 
 import numpy as np
 from omegaconf import OmegaConf
 import torch
 import torch.distributed as dist
 
-CACHE_VERSION = 2
+CACHE_VERSION = 3
 
 if TYPE_CHECKING:
     from src.config_schema import AppConfig
@@ -39,7 +39,14 @@ def get_embedding_cache_path(cfg):
 
     return path
 
-def save_text_embedding(ids, embeddings, shuffle_seed, path: Path, layer_embeddings=None):
+def save_text_embedding(
+    ids,
+    embeddings,
+    shuffle_seed,
+    path: Path,
+    layer_embeddings=None,
+    pooling_method: Optional[str] = None,
+):
     """
     Saves numpy embeddings and their ids to the specified path.
 
@@ -54,9 +61,11 @@ def save_text_embedding(ids, embeddings, shuffle_seed, path: Path, layer_embeddi
     path : Path
         Destination file.
     layer_embeddings : Optional[np.ndarray]
-        Mean-pooled hidden states for all transformer layers with shape
+        Pooled hidden states for all transformer layers with shape
         (num_samples, num_layers, hidden_dim). Stored when available to avoid
         recomputing heavy transformer passes.
+    pooling_method : Optional[str]
+        Pooling method used to produce ``embeddings`` (e.g., ``mean`` or ``cls``).
     """
     print(f"Caching text embeddings to {path}...")
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -68,12 +77,14 @@ def save_text_embedding(ids, embeddings, shuffle_seed, path: Path, layer_embeddi
     }
     if layer_embeddings is not None:
         save_kwargs["layer_embeddings"] = layer_embeddings
+    if pooling_method is not None:
+        save_kwargs["pooling_method"] = np.asarray(pooling_method)
     np.savez(path, **save_kwargs)
 
     print("...done.")
 
 def load_text_embedding(path: Path):
-    """Loads cached ids and embeddings from the specified path if it exists."""
+    """Loads cached embeddings if compatible with the current cache schema."""
     if not path.exists():
         print(f"No cached text embeddings found at {path}.")
         return None
@@ -81,12 +92,25 @@ def load_text_embedding(path: Path):
     print(f"Found cached text embeddings at {path}. Loading...")
 
     data = np.load(path, allow_pickle=True)
+    cache_version = (
+        data["cache_version"].item() if "cache_version" in data.files else None
+    )
+    if cache_version != CACHE_VERSION:
+        print(
+            f"Cached embeddings version mismatch (found {cache_version}, expected {CACHE_VERSION}). "
+            "Recomputing..."
+        )
+        return None
+
     ids = data["ids"]
     embeddings = data["embeddings"]
     shuffle_seed = data["shuffle_seed"].item() if "shuffle_seed" in data.files else None
     layer_embeddings = data["layer_embeddings"] if "layer_embeddings" in data.files else None
+    pooling_method = (
+        data["pooling_method"].item() if "pooling_method" in data.files else None
+    )
     print("...done.")
-    return ids, embeddings, shuffle_seed, layer_embeddings
+    return ids, embeddings, shuffle_seed, layer_embeddings, pooling_method
 
 
 def apply_reproducibility(cfg: "AppConfig") -> None:
@@ -120,3 +144,65 @@ def apply_reproducibility(cfg: "AppConfig") -> None:
     if torch.backends.cudnn.is_available():
         torch.backends.cudnn.deterministic = repro_cfg.deterministic
         torch.backends.cudnn.benchmark = repro_cfg.cudnn_benchmark
+
+
+def resolve_shuffle_seed(cfg: "AppConfig") -> Optional[int]:
+    """Resolve shuffle seed from configuration.
+    
+    Checks cfg.dataset.shuffle_seed first, then falls back to
+    cfg.evaluation.random_state if available.
+    """
+    if getattr(cfg.dataset, "shuffle_seed", None) is not None:
+        return cfg.dataset.shuffle_seed
+    if hasattr(cfg, "evaluation"):
+        return getattr(cfg.evaluation, "random_state", None)
+    return None
+
+
+def build_id_index_map(
+    requested_ids: Sequence,
+    cached_ids: Sequence,
+) -> Tuple[List[str], Dict[str, int]]:
+    """Build string ID to index mapping for efficient cache lookups.
+    
+    Returns:
+        (str_ids, id_to_index): List of string IDs and mapping dict.
+    """
+    str_ids = [str(i) for i in requested_ids]
+    id_to_index = {str(cached_id): idx for idx, cached_id in enumerate(cached_ids)}
+    return str_ids, id_to_index
+
+
+def normalize_binary_labels(data: np.ndarray) -> np.ndarray:
+    """Normalize binary labels from {-1, 1} to {0, 1}.
+    
+    If data contains only -1 and 1, converts to 0 and 1.
+    Otherwise returns data unchanged.
+    """
+    data = np.asarray(data)
+    unique_values = set(np.unique(data))
+    if unique_values == {-1, 1}:
+        return np.where(data == -1, 0, 1)
+    return data
+
+
+def should_log_to_wandb() -> bool:
+    """Check if Weights & Biases logging is active."""
+    import wandb
+    return wandb.run is not None
+
+
+def find_run_dirs(results_root: Path, run_id: str) -> List[Path]:
+    """Locate run directories whose wandb_run_id.txt matches ``run_id``.
+    
+    Searches recursively under results_root for directories containing
+    a wandb_run_id.txt file with content matching run_id.
+    """
+    matches: List[Path] = []
+    for marker in results_root.rglob("wandb_run_id.txt"):
+        try:
+            if marker.read_text().strip() == run_id:
+                matches.append(marker.parent)
+        except OSError:
+            continue
+    return sorted(matches)

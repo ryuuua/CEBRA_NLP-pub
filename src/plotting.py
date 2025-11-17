@@ -7,6 +7,7 @@ from typing import List, Optional, Tuple
 from omegaconf import DictConfig, OmegaConf
 
 from src.config_schema import AppConfig
+from src.utils import normalize_binary_labels
 
 
 def prepare_plot_labels(
@@ -14,10 +15,7 @@ def prepare_plot_labels(
 ) -> Tuple[List, Optional[dict], List]:
     """Return text labels plus palette/order for plotting functions."""
     if cfg.cebra.conditional == "discrete":
-        data = np.asarray(conditional_data).reshape(-1)
-        unique_values = set(np.unique(data))
-        if unique_values == {-1, 1}:
-            data = np.where(data == -1, 0, 1)
+        data = normalize_binary_labels(np.asarray(conditional_data).reshape(-1))
         label_map = {int(k): v for k, v in cfg.dataset.label_map.items()}
         labels = [label_map[int(v)] for v in data]
 

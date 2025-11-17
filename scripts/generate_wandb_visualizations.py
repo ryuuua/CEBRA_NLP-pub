@@ -23,6 +23,8 @@ from src.utils import (
     get_embedding_cache_path,
     load_text_embedding,
     save_text_embedding,
+    build_id_index_map,
+    find_run_dirs,
 )
 from src.embeddings import (
     get_embeddings,
@@ -94,14 +96,6 @@ def _load_cfg(run_dir: Path, *, device_override: Optional[str] = None) -> AppCon
     return cfg
 
 
-def _find_run_dirs(results_root: Path, run_id: str) -> List[Path]:
-    matches: List[Path] = []
-    for marker in results_root.rglob("wandb_run_id.txt"):
-        if marker.read_text().strip() == run_id:
-            matches.append(marker.parent)
-    return sorted(matches)
-
-
 def _collect_run_ids(
     cli_ids: Iterable[str],
     run_ids_file: Optional[Path],
@@ -155,9 +149,8 @@ def _prepare_base_embeddings(cfg: AppConfig, ids: Iterable, texts: List[str]) ->
     cache = load_text_embedding(cache_path)
     if cache is not None:
         cached_ids, cached_embeddings, cached_seed, cached_layer_embeddings = cache
-        id_to_index = {str(i): idx for idx, i in enumerate(cached_ids)}
         # Convert ids to strings once for efficient lookup
-        str_ids = [str(i) for i in ids]
+        str_ids, id_to_index = build_id_index_map(ids, cached_ids)
         try:
             selection_indices = np.asarray(
                 [id_to_index[sid] for sid in str_ids], dtype=int
@@ -430,7 +423,7 @@ def _drive(
     scheduled: List[Tuple[str, Path]] = []
     missing = 0
     for run_id in run_ids:
-        matches = _find_run_dirs(results_root, run_id)
+        matches = find_run_dirs(results_root, run_id)
         if not matches:
             print(f"[WARN] No results directory found for run ID {run_id}")
             missing += 1

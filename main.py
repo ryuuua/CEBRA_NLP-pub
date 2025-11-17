@@ -6,12 +6,11 @@ import wandb
 import pandas as pd
 from pathlib import Path
 from copy import deepcopy
-from typing import Optional
 from src.config_schema import AppConfig, EmbeddingConfig
 from hydra.core.hydra_config import HydraConfig
 from hydra.utils import get_original_cwd
 from src.data import load_and_prepare_dataset
-from src.utils import apply_reproducibility
+from src.utils import apply_reproducibility, normalize_binary_labels
 from src.embeddings import (
     get_embeddings,
     load_or_generate_embeddings,
@@ -103,7 +102,7 @@ def main(cfg: AppConfig) -> None:
 
         # --- 1. Load Dataset ---
         print("\n--- Step 1: Loading dataset ---")
-        texts, conditional_data, time_indices, ids = load_and_prepare_dataset(cfg)
+        texts, conditional_data, _, ids = load_and_prepare_dataset(cfg)
 
         # --- 2. Get Text Embeddings ---
         print("\n--- Step 2: Generating text embeddings ---")
@@ -111,8 +110,8 @@ def main(cfg: AppConfig) -> None:
 
         # --- Data Splitting ---
         print("\n--- Step 3: Splitting data ---")
-        X_train, X_valid, conditional_train, conditional_valid, time_train, time_valid = train_test_split(
-            X_vectors, conditional_data, time_indices,
+        X_train, X_valid, conditional_train, conditional_valid = train_test_split(
+            X_vectors, conditional_data,
             test_size=cfg.evaluation.test_size,
             random_state=cfg.evaluation.random_state,
             stratify=(conditional_data if conditional_type == 'discrete' else None)
@@ -153,12 +152,10 @@ def main(cfg: AppConfig) -> None:
             # [DISCRETE CASE]
             print("Running discrete evaluation and visualization...")
             label_map = {int(k): v for k, v in cfg.dataset.label_map.items()}
-            labels = np.asarray(conditional_data, dtype=int)
-            # 半角スペース4つなどでインデントし直して貼ってください
-            conditional_set = set(conditional_data)
-            if conditional_set == {-1, 1}:
-                conditional_data = [0 if x == -1 else 1 for x in conditional_data]
-            text_labels_full = [label_map[l] for l in conditional_data]
+            conditional_data = normalize_binary_labels(
+                np.asarray(conditional_data)
+            ).tolist()
+            text_labels_full = [label_map[int(l)] for l in conditional_data]
             palette = OmegaConf.to_container(cfg.dataset.visualization.emotion_colors, resolve=True)
             order = OmegaConf.to_container(cfg.dataset.visualization.emotion_order, resolve=True)
 
