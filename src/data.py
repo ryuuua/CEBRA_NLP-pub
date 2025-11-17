@@ -175,6 +175,13 @@ def _load_sklearn_dataset(dataset_cfg) -> pd.DataFrame:
         )
 
 
+def _collapse_go_emotions_label(value):
+    """Collapse go_emotions label lists to single values."""
+    if isinstance(value, (list, tuple)):
+        return value[0] if len(value) > 0 else np.nan
+    return value
+
+
 def load_and_prepare_dataset(cfg: "AppConfig"):
     """Load dataset and prepare texts, conditional data, time indices and IDs."""
     dataset_cfg = cfg.dataset
@@ -202,15 +209,12 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
     if dataset_cfg.hf_path == "go_emotions" and dataset_cfg.label_column is not None:
         label_col = dataset_cfg.label_column
         
-        def _collapse_go_emotions_label(value):
-            if isinstance(value, (list, tuple)):
-                return value[0] if len(value) > 0 else np.nan
-            return value
-        
         if dataset_cfg.drop_multi_label_samples:
             print("Applying go_emotions filter: removing multi-label samples.")
             before_count = len(df)
-            df = df[df[label_col].apply(lambda x: isinstance(x, (list, tuple)) and len(x) == 1)].reset_index(drop=True)
+            # Vectorized filtering: check if label is list/tuple with length 1
+            mask = df[label_col].apply(lambda x: isinstance(x, (list, tuple)) and len(x) == 1)
+            df = df[mask].reset_index(drop=True)
             after_count = len(df)
             print(f"go_emotions samples after filtering: {after_count} (removed {before_count - after_count}).")
         else:

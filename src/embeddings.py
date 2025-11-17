@@ -7,6 +7,8 @@ from src.utils import (
     get_embedding_cache_path,
     load_text_embedding,
     save_text_embedding,
+    resolve_shuffle_seed,
+    build_id_index_map,
 )
 
 from typing import Optional, Sequence, List
@@ -270,16 +272,6 @@ def get_embeddings(texts: list, cfg: AppConfig) -> np.ndarray:
         raise ValueError(f"Unknown embedding type: {emb_cfg.type}")
 
 
-def _resolve_shuffle_seed(cfg: AppConfig) -> Optional[int]:
-    dataset_seed = getattr(cfg.dataset, "shuffle_seed", None)
-    if dataset_seed is not None:
-        return dataset_seed
-    eval_cfg = getattr(cfg, "evaluation", None)
-    if eval_cfg is not None:
-        return getattr(eval_cfg, "random_state", None)
-    return None
-
-
 def load_or_generate_embeddings(
     cfg: AppConfig, texts: Sequence[str], ids: Sequence
 ) -> np.ndarray:
@@ -288,15 +280,14 @@ def load_or_generate_embeddings(
     """
     embedding_cache_path = get_embedding_cache_path(cfg)
     cache = load_text_embedding(embedding_cache_path)
-    resolved_seed = _resolve_shuffle_seed(cfg)
+    resolved_seed = resolve_shuffle_seed(cfg)
 
     # Try to load from cache
     if cache is not None:
         cached_ids, cached_embeddings, cached_seed, cached_layer_embeddings = cache
         if cached_seed == resolved_seed:
             # Convert ids to strings once for efficient lookup
-            str_ids = [str(i) for i in ids]
-            id_to_index = {str(cached_id): idx for idx, cached_id in enumerate(cached_ids)}
+            str_ids, id_to_index = build_id_index_map(ids, cached_ids)
             try:
                 selection_indices = np.asarray(
                     [id_to_index[sid] for sid in str_ids], dtype=int
@@ -324,7 +315,7 @@ def load_or_generate_embeddings(
             print("Cached embeddings shuffle seed mismatch. Recomputing...")
 
     # Generate new embeddings
-    X_vectors = get_embeddings(list(texts), cfg)
+    X_vectors = get_embeddings(texts, cfg)
     layer_cache = get_last_hidden_state_cache()
     save_text_embedding(
         ids,
