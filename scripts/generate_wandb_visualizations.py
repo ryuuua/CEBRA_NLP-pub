@@ -16,26 +16,20 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.config_schema import AppConfig
 from src.data import load_and_prepare_dataset
-from src.plotting import prepare_plot_labels
-from src.results import save_interactive_plot, save_static_2d_plots
+from src.plotting import (
+    prepare_plot_labels,
+    render_discrete_visualizations,
+    render_continuous_visualizations,
+)
+from src.results import save_interactive_plot
 from src.utils import (
-    apply_reproducibility,
-    get_embedding_cache_path,
-    load_text_embedding,
-    save_text_embedding,
-    build_id_index_map,
     find_run_dirs,
+    prepare_app_config,
 )
-from src.embeddings import (
-    get_embeddings,
-    get_last_hidden_state_cache,
-    clear_last_hidden_state_cache,
-    resolve_layer_index,
-)
+from src.embeddings import load_or_generate_embeddings
 from src.cebra_trainer import (
     load_cebra_model,
     transform_cebra,
-    normalize_model_architecture,
 )
 
 
@@ -79,19 +73,12 @@ def _load_cfg(run_dir: Path, *, device_override: Optional[str] = None) -> AppCon
 
     hydra_cfg = OmegaConf.load(hydra_cfg_path)
 
-    default_cfg = OmegaConf.structured(AppConfig)
-    cfg = OmegaConf.merge(default_cfg, hydra_cfg)
-    OmegaConf.set_struct(cfg, False)
+    if device_override is not None:
+        device = _resolve_device(device_override)
+    else:
+        device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    cfg.cebra.conditional = cfg.cebra.conditional.lower()
-    cfg.cebra.model_architecture = normalize_model_architecture(
-        getattr(cfg.cebra, "model_architecture", "offset0-model")
-    )
-    cfg.device = (
-        _resolve_device(device_override)
-        if device_override is not None
-        else ("cuda" if torch.cuda.is_available() else "cpu")
-    )
+    cfg = prepare_app_config(hydra_cfg, device_override=device)
 
     return cfg
 
@@ -145,49 +132,7 @@ def _resolve_visualization_paths(
 
 def _prepare_base_embeddings(cfg: AppConfig, ids: Iterable, texts: List[str]) -> np.ndarray:
     """Reuse cached embeddings when possible, otherwise recompute."""
-    cache_path = get_embedding_cache_path(cfg)
-    cache = load_text_embedding(cache_path)
-    if cache is not None:
-        cached_ids, cached_embeddings, cached_seed, cached_layer_embeddings = cache
-        # Convert ids to strings once for efficient lookup
-        str_ids, id_to_index = build_id_index_map(ids, cached_ids)
-        try:
-            selection_indices = np.asarray(
-                [id_to_index[sid] for sid in str_ids], dtype=int
-            )
-        except KeyError:
-            selection_indices = None
-
-        if selection_indices is not None:
-            if cfg.embedding.type == "hf_transformer" and cached_layer_embeddings is not None:
-                hidden_state_layer = getattr(cfg.embedding, "hidden_state_layer", None)
-                layer_idx = resolve_layer_index(
-                    cached_layer_embeddings.shape[1],
-                    hidden_state_layer,
-                )
-                return cached_layer_embeddings[selection_indices, layer_idx, :]
-            return np.asarray(cached_embeddings[selection_indices])
-
-    embeddings = get_embeddings(texts, cfg)
-    # get_embeddings caches the full hidden-state tensor internally; stash for reuse
-    layer_cache = get_last_hidden_state_cache()
-    if layer_cache is not None and layer_cache.shape[0] != embeddings.shape[0]:
-        layer_cache = None  # fallback if cache mismatched
-    shuffle_seed = getattr(cfg.dataset, "shuffle_seed", None)
-    seed = (
-        shuffle_seed
-        if shuffle_seed is not None
-        else getattr(getattr(cfg, "evaluation", None), "random_state", None)
-    )
-    save_text_embedding(
-        ids,
-        embeddings,
-        seed,
-        cache_path,
-        layer_embeddings=layer_cache,
-    )
-    clear_last_hidden_state_cache()
-    return embeddings
+    return load_or_generate_embeddings(cfg, texts, ids)
 
 
 def _load_cebra_embeddings(
@@ -274,7 +219,6 @@ def _generate_visualizations(
 ) -> Literal["generated", "skipped_existing", "missing_artifacts"]:
     print(f"\nProcessing run {run_id} at {run_dir}")
     cfg = _load_cfg(run_dir, device_override=device_override)
-    apply_reproducibility(cfg)
 
     viz_dir, interactive_path, expected_static, conditional_desc = _resolve_visualization_paths(
         cfg, run_dir
@@ -306,27 +250,21 @@ def _generate_visualizations(
 
     viz_dir.mkdir(parents=True, exist_ok=True)
 
-    save_interactive_plot(
-        embeddings=cebra_embeddings,
-        text_labels=labels,
-        output_dim=cfg.cebra.output_dim,
-        palette=palette,
-        title=f"{cfg.dataset.name} · {run_id} ({conditional_desc})",
-        output_path=interactive_path,
-    )
-
     if cfg.cebra.conditional == "discrete":
-        hue_order = order if order else sorted(set(labels))
-        title_prefix = f"{cfg.dataset.name} ({run_id})"
-        save_static_2d_plots(
-            embeddings=cebra_embeddings,
-            text_labels=labels,
-            palette=palette,
-            title_prefix=title_prefix,
-            output_dir=viz_dir,
-            hue_order=hue_order,
-            cfg=cfg,
-            log_to_wandb=False,
+        render_discrete_visualizations(
+            cfg,
+            cebra_embeddings,
+            labels,
+            viz_dir,
+            interactive_path=interactive_path,
+        )
+    else:
+        render_continuous_visualizations(
+            cfg,
+            cebra_embeddings,
+            labels,
+            viz_dir,
+            interactive_path=interactive_path,
         )
 
     return "generated"

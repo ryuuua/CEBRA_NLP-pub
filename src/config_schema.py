@@ -15,7 +15,6 @@ class DatasetConfig:
     label_map: Dict[int, str]
     visualization: VisualizationConfig
     label_remap: Dict[int, int] = field(default_factory=dict)
-
     label_column: Optional[str] = None
     # When working with multi-label data, either specify multiple
     # columns containing binary indicators or provide a single column
@@ -26,11 +25,9 @@ class DatasetConfig:
     label_delimiter: Optional[str] = None
     drop_multi_label_samples: bool = False
 
-    # Kaggle datasets require a handle to download the data.
-    kaggle_handle: Optional[str] = None
-
     hf_path: Optional[str] = None
     trust_remote_code: bool = False
+    # Kaggle datasets require a handle to download the data.
     kaggle_handle: Optional[str] = None
     sklearn_dataset: Optional[str] = None
     source: str = "hf"

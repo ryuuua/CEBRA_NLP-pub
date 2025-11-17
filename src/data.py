@@ -1,17 +1,12 @@
 import os
 import urllib.request
-import pandas as pd
-import numpy as np
-from datasets import load_dataset
+from typing import List
+
 import kagglehub
+import numpy as np
+import pandas as pd
+from datasets import load_dataset
 from sklearn.datasets import fetch_20newsgroups
-from src.config_schema import AppConfig
-
-from typing import TYPE_CHECKING, List
-
-
-if TYPE_CHECKING:
-    from src.config_schema import AppConfig
 
 
 _TREC_URLS = {
@@ -205,55 +200,58 @@ def load_and_prepare_dataset(cfg: "AppConfig"):
             f"{dataset_cfg.source}. Supported sources are 'hf', 'csv', 'kaggle', and 'sklearn'."
         )
 
-    # Special handling for go_emotions variants: optionally drop multi-label rows and collapse lists.
-    if dataset_cfg.hf_path == "go_emotions" and dataset_cfg.label_column is not None:
-        label_col = dataset_cfg.label_column
-        
+    label_col = dataset_cfg.label_column
+    text_col = dataset_cfg.text_column
+
+    if dataset_cfg.hf_path == "go_emotions" and label_col is not None:
+        goemo_series = df[label_col]
         if dataset_cfg.drop_multi_label_samples:
             print("Applying go_emotions filter: removing multi-label samples.")
             before_count = len(df)
-            # Vectorized filtering: check if label is list/tuple with length 1
-            mask = df[label_col].apply(lambda x: isinstance(x, (list, tuple)) and len(x) == 1)
-            df = df[mask].reset_index(drop=True)
+            single_mask = goemo_series.apply(
+                lambda x: isinstance(x, (list, tuple)) and len(x) == 1
+            )
+            df = df[single_mask].reset_index(drop=True)
+            goemo_series = df[label_col]
             after_count = len(df)
-            print(f"go_emotions samples after filtering: {after_count} (removed {before_count - after_count}).")
+            print(
+                f"go_emotions samples after filtering: {after_count} (removed {before_count - after_count})."
+            )
         else:
             print("Applying special handling for go_emotions: using only the first label.")
-        
-        df[label_col] = df[label_col].apply(_collapse_go_emotions_label)
+        df[label_col] = goemo_series.apply(_collapse_go_emotions_label)
 
-    if dataset_cfg.label_column is not None and dataset_cfg.label_remap:
-        label_col = dataset_cfg.label_column
+    if label_col is not None and dataset_cfg.label_remap:
         remap = dataset_cfg.label_remap
-        df = df[df[label_col].isin(remap.keys())].reset_index(drop=True)
+        label_mask = df[label_col].isin(remap.keys())
+        df = df[label_mask].reset_index(drop=True)
         df[label_col] = df[label_col].map(remap).astype(np.int64)
 
-    # Filter to valid labels for single-label datasets
-    if dataset_cfg.label_column is not None and not dataset_cfg.multi_label:
+    if label_col is not None and not dataset_cfg.multi_label:
         valid_labels = set(dataset_cfg.label_map.keys())
-        df = df[df[dataset_cfg.label_column].isin(valid_labels)].reset_index(drop=True)
+        df = df[df[label_col].isin(valid_labels)].reset_index(drop=True)
     
     # Drop rows with missing values based on conditional mode
     if conditional_mode == "none":
         # Expect V, A, D columns and drop rows with missing values
-        df = df.dropna(subset=[dataset_cfg.text_column, "V", "A", "D"]).reset_index(drop=True)
+        df = df.dropna(subset=[text_col, "V", "A", "D"]).reset_index(drop=True)
     else:
         # Non-none conditional mode: determine columns to check for missing values
         if dataset_cfg.multi_label:
             if dataset_cfg.label_columns:
-                subset_cols = [dataset_cfg.text_column] + dataset_cfg.label_columns
-            elif dataset_cfg.label_column is not None:
-                subset_cols = [dataset_cfg.text_column, dataset_cfg.label_column]
+                subset_cols = [text_col] + dataset_cfg.label_columns
+            elif label_col is not None:
+                subset_cols = [text_col, label_col]
             else:
                 raise ValueError(
                     "multi_label=True requires either label_columns or label_column"
                 )
         else:
-            if dataset_cfg.label_column is None:
+            if label_col is None:
                 raise ValueError(
                     "dataset.label_column must be set when cfg.cebra.conditional is not 'none'"
                 )
-            subset_cols = [dataset_cfg.text_column, dataset_cfg.label_column]
+            subset_cols = [text_col, label_col]
         
         df = df.dropna(subset=subset_cols).reset_index(drop=True)
 

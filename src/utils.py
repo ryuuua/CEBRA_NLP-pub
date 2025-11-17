@@ -1,6 +1,6 @@
 import random
 from pathlib import Path
-from typing import TYPE_CHECKING, Optional, Sequence, Dict, Tuple, List
+from typing import TYPE_CHECKING, Any, Optional, Sequence, Dict, Tuple, List
 
 import numpy as np
 from omegaconf import OmegaConf
@@ -120,6 +120,43 @@ def apply_reproducibility(cfg: "AppConfig") -> None:
     if torch.backends.cudnn.is_available():
         torch.backends.cudnn.deterministic = repro_cfg.deterministic
         torch.backends.cudnn.benchmark = repro_cfg.cudnn_benchmark
+
+
+def prepare_app_config(
+    raw_cfg: Any,
+    *,
+    device_override: Optional[str] = None,
+    ddp_defaults: Optional[Dict[str, int]] = None,
+) -> "AppConfig":
+    """
+    Normalize Hydra configs into AppConfig with standard defaults applied.
+    """
+    from src.config_schema import AppConfig
+    from src.cebra_trainer import normalize_model_architecture
+
+    default_cfg = OmegaConf.structured(AppConfig)
+    cfg = OmegaConf.merge(default_cfg, raw_cfg)
+    OmegaConf.set_struct(cfg, False)
+
+    if hasattr(cfg, "cebra"):
+        if getattr(cfg.cebra, "conditional", None) is not None:
+            cfg.cebra.conditional = cfg.cebra.conditional.lower()
+        cfg.cebra.model_architecture = normalize_model_architecture(
+            getattr(cfg.cebra, "model_architecture", "offset1-model")
+        )
+
+    if ddp_defaults:
+        ddp_cfg = getattr(cfg, "ddp", None)
+        if ddp_cfg is not None:
+            for key, value in ddp_defaults.items():
+                if value is not None and hasattr(ddp_cfg, key):
+                    setattr(ddp_cfg, key, value)
+
+    if device_override is not None:
+        cfg.device = device_override
+
+    apply_reproducibility(cfg)
+    return cfg
 
 
 def resolve_shuffle_seed(cfg: "AppConfig") -> Optional[int]:

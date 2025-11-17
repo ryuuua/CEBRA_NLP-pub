@@ -3,7 +3,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Callable, Iterable, List, Optional, Sequence, Tuple
+
 from omegaconf import DictConfig, OmegaConf
 
 from src.config_schema import AppConfig
@@ -102,3 +103,73 @@ def plot_embedding_distributions(
     plt.savefig(filename)
     print(f"Distribution plot saved to: {filename}")
     plt.close()
+
+
+def render_discrete_visualizations(
+    cfg: AppConfig,
+    embeddings_full: np.ndarray,
+    text_labels_full: Sequence[str],
+    output_dir: Path,
+    *,
+    interactive_path: Optional[Path] = None,
+    wandb_hook: Optional[Callable[[Iterable[Path]], None]] = None,
+) -> None:
+    palette = OmegaConf.to_container(cfg.dataset.visualization.emotion_colors, resolve=True)
+    order = OmegaConf.to_container(cfg.dataset.visualization.emotion_order, resolve=True)
+
+    if not cfg.evaluation.enable_plots:
+        return
+
+    interactive = interactive_path or (output_dir / "cebra_interactive_discrete.html")
+    save_interactive_plot(
+        embeddings_full,
+        text_labels_full,
+        cfg.cebra.output_dim,
+        palette,
+        "Interactive CEBRA (Discrete)",
+        interactive,
+    )
+    static_paths: List[Path] = []
+    if wandb_hook is not None and interactive.exists():
+        wandb_hook([interactive])
+    save_static_2d_plots(
+        embeddings_full,
+        text_labels_full,
+        palette,
+        "CEBRA Embeddings (Discrete)",
+        output_dir,
+        order,
+    )
+    if wandb_hook is not None:
+        static_paths = [
+            output_dir / "static_PCA_plot.png",
+            output_dir / "static_UMAP_plot.png",
+        ]
+        existing = [path for path in static_paths if path.exists()]
+        if existing:
+            wandb_hook(existing)
+
+
+def render_continuous_visualizations(
+    cfg: AppConfig,
+    embeddings_full: np.ndarray,
+    values: Sequence[float],
+    output_dir: Path,
+    *,
+    interactive_path: Optional[Path] = None,
+    wandb_hook: Optional[Callable[[Iterable[Path]], None]] = None,
+) -> None:
+    if not cfg.evaluation.enable_plots:
+        return
+
+    interactive = interactive_path or (output_dir / "None.html")
+    save_interactive_plot(
+        embeddings=embeddings_full,
+        text_labels=values,
+        output_dim=cfg.cebra.output_dim,
+        palette=None,
+        title="Interactive CEBRA (None - Colored by Valence)",
+        output_path=interactive,
+    )
+    if wandb_hook is not None and interactive.exists():
+        wandb_hook([interactive])

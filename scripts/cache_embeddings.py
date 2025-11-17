@@ -17,7 +17,6 @@ from typing import Any, Dict, List, Optional
 import numpy as np
 import torch
 import torch.distributed as dist
-from omegaconf import OmegaConf
 
 import hydra
 
@@ -29,10 +28,10 @@ from src.embeddings import (
     get_last_hidden_state_cache,
 )
 from src.utils import (
-    apply_reproducibility,
     get_embedding_cache_path,
     load_text_embedding,
     save_text_embedding,
+    prepare_app_config,
 )
 
 
@@ -51,11 +50,20 @@ def _should_skip_cache(ids: np.ndarray, seed: Optional[int], cache_path) -> bool
         print("Cached embeddings have a different shuffle seed; regenerating.")
         return False
 
-    ids_str = np.asarray(ids, dtype=str)
-    cached_ids_str = np.asarray(cached_ids, dtype=str)
-    if ids_str.shape != cached_ids_str.shape or not np.array_equal(
-        ids_str, cached_ids_str
-    ):
+    ids_arr = np.asarray(ids)
+    cached_ids_arr = np.asarray(cached_ids)
+    if ids_arr.shape != cached_ids_arr.shape:
+        print("Cached embeddings do not match dataset ids; regenerating.")
+        return False
+
+    def _as_str_view(array: np.ndarray) -> np.ndarray:
+        if array.dtype.kind in {"U", "S"}:
+            return array
+        return array.astype(str, copy=False)
+
+    ids_str = _as_str_view(ids_arr)
+    cached_ids_str = _as_str_view(cached_ids_arr)
+    if not np.array_equal(ids_str, cached_ids_str):
         print("Cached embeddings do not match dataset ids; regenerating.")
         return False
 
@@ -86,27 +94,30 @@ def _gather_chunks(payload: Dict[str, Any], world_size: int, rank: int) -> List[
 
 @hydra.main(config_path="../conf", config_name="config", version_base="1.2")
 def cache_embeddings(cfg: AppConfig) -> None:
-    default_cfg = OmegaConf.structured(AppConfig)
-    cfg = OmegaConf.merge(default_cfg, cfg)
-    OmegaConf.set_struct(cfg, False)
-
     world_size = int(os.environ.get("WORLD_SIZE", 1))
     rank = int(os.environ.get("RANK", 0))
     local_rank = int(os.environ.get("LOCAL_RANK", 0))
-    cfg.ddp.world_size = world_size
-    cfg.ddp.rank = rank
-    cfg.ddp.local_rank = local_rank
+
+    device_override: Optional[str] = None
 
     if world_size > 1:
         dist.init_process_group(backend="nccl", rank=rank, world_size=world_size)
         torch.cuda.set_device(local_rank)
         if torch.cuda.is_available():
-            cfg.device = f"cuda:{local_rank}"
+            device_override = f"cuda:{local_rank}"
     else:
         if torch.cuda.is_available():
-            cfg.device = "cuda"
+            device_override = "cuda"
 
-    apply_reproducibility(cfg)
+    cfg = prepare_app_config(
+        cfg,
+        device_override=device_override,
+        ddp_defaults={
+            "world_size": world_size,
+            "rank": rank,
+            "local_rank": local_rank,
+        },
+    )
     is_main = rank == 0
 
     print(f"[Rank {rank}] Loading dataset...")
