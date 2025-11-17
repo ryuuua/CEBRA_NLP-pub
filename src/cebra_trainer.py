@@ -1,9 +1,11 @@
+import gc
 import numpy as np
 from pathlib import Path
 from src.config_schema import AppConfig
 from tqdm.auto import tqdm
 import wandb
 from cebra.distributions.discrete import DiscreteUniform, DiscreteEmpirical
+from .utils import should_log_to_wandb
 
 def get_cebra_config_hash(cfg):
     import json, hashlib
@@ -304,7 +306,7 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
                 loss.backward()
                 optimizer.step()
                 
-                if wandb.run is not None:
+                if should_log_to_wandb():
                     wandb.log({"loss": loss.item()}, step=steps)
 
                 steps += 1
@@ -348,7 +350,6 @@ def train_cebra(X_vectors, labels, cfg: AppConfig, output_dir):
         if iterator is not None:
             iterator._shutdown_workers()
         del loader
-        import gc
         gc.collect()
     
     return model

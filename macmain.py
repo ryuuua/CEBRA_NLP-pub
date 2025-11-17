@@ -41,19 +41,14 @@ from src.utils import (
     get_embedding_cache_path,
     load_text_embedding,
     save_text_embedding,
+    resolve_shuffle_seed,
+    build_id_index_map,
+    normalize_binary_labels,
+    should_log_to_wandb,
 )
 
 
 load_dotenv()
-
-
-def _resolve_shuffle_seed(cfg: AppConfig) -> Optional[int]:
-    """Resolve shuffle seed from configuration."""
-    if getattr(cfg.dataset, "shuffle_seed", None) is not None:
-        return cfg.dataset.shuffle_seed
-    if hasattr(cfg, "evaluation"):
-        return cfg.evaluation.random_state
-    return None
 
 
 def _load_cached_embeddings(
@@ -64,14 +59,13 @@ def _load_cached_embeddings(
         return None
 
     cached_ids, cached_embeddings, cached_seed, cached_layer_embeddings = cache
-    seed = _resolve_shuffle_seed(cfg)
+    seed = resolve_shuffle_seed(cfg)
     if cached_seed != seed:
         print("Cached embeddings shuffle seed mismatch. Recomputing...")
         return None
 
     # Convert ids to strings once for efficient lookup
-    str_ids = [str(i) for i in ids]
-    id_to_index = {str(cached_id): idx for idx, cached_id in enumerate(cached_ids)}
+    str_ids, id_to_index = build_id_index_map(ids, cached_ids)
     
     try:
         if (
@@ -89,9 +83,10 @@ def _load_cached_embeddings(
                 selection_indices, target_layer, :
             ]
         else:
-            return np.stack(
-                [cached_embeddings[id_to_index[sid]] for sid in str_ids]
+            selection_indices = np.asarray(
+                [id_to_index[sid] for sid in str_ids], dtype=int
             )
+            return np.asarray(cached_embeddings)[selection_indices]
     except KeyError:
         print("Cached embeddings are missing required ids. Recomputing...")
         return None
@@ -99,11 +94,6 @@ def _load_cached_embeddings(
         # ValueError from resolve_layer_index for invalid layer indices
         print("Invalid layer index in cached embeddings. Recomputing...")
         return None
-
-
-def _should_log_to_wandb() -> bool:
-    """Check if we should log to wandb."""
-    return wandb.run is not None
 
 
 @hydra.main(config_path="conf", config_name="config", version_base="1.2")
@@ -147,7 +137,7 @@ def main(cfg: AppConfig) -> None:
 
         arch = normalize_model_architecture(cfg.cebra.model_architecture)
         cfg.cebra.model_architecture = arch
-        if _should_log_to_wandb():
+        if should_log_to_wandb():
             wandb.config.update(
                 {
                     "cebra_output_dim": cfg.cebra.output_dim,
@@ -165,7 +155,7 @@ def main(cfg: AppConfig) -> None:
         print("\n--- Step 2: Generating text embeddings ---")
         embedding_cache_path = get_embedding_cache_path(cfg)
         cache = load_text_embedding(embedding_cache_path)
-        seed = _resolve_shuffle_seed(cfg)
+        seed = resolve_shuffle_seed(cfg)
 
         X_vectors = _load_cached_embeddings(cache, ids, cfg)
         if X_vectors is None:
@@ -202,7 +192,7 @@ def main(cfg: AppConfig) -> None:
         cebra_model = train_cebra(X_train, labels_for_training, cfg, output_dir)
         model_path = save_cebra_model(cebra_model, output_dir)
 
-        if _should_log_to_wandb():
+        if should_log_to_wandb():
             model_artifact = wandb.Artifact(name=model_path.stem, type="model")
             model_artifact.add_file(str(model_path))
             wandb.log_artifact(model_artifact)
@@ -212,7 +202,7 @@ def main(cfg: AppConfig) -> None:
         cebra_embeddings_full = transform_cebra(cebra_model, X_vectors, cfg.device)
         if cfg.cebra.save_embeddings:
             emb_path = save_cebra_embeddings(cebra_embeddings_full, output_dir)
-            if _should_log_to_wandb():
+            if should_log_to_wandb():
                 emb_artifact = wandb.Artifact(name=emb_path.stem, type="embeddings")
                 emb_artifact.add_file(str(emb_path))
                 wandb.log_artifact(emb_artifact)
@@ -226,9 +216,8 @@ def main(cfg: AppConfig) -> None:
             print("Running discrete evaluation and visualization...")
             label_map = {int(k): v for k, v in cfg.dataset.label_map.items()}
             # Normalize binary labels from {-1, 1} to {0, 1}
-            if set(conditional_data) == {-1, 1}:
-                conditional_data = np.where(np.asarray(conditional_data) == -1, 0, 1).tolist()
-            text_labels_full = [label_map[label] for label in conditional_data]
+            conditional_data = normalize_binary_labels(np.asarray(conditional_data)).tolist()
+            text_labels_full = [label_map[int(label)] for label in conditional_data]
             palette = OmegaConf.to_container(
                 cfg.dataset.visualization.emotion_colors, resolve=True
             )
@@ -261,7 +250,7 @@ def main(cfg: AppConfig) -> None:
                     output_dir,
                     order,
                 )
-                if _should_log_to_wandb():
+                if should_log_to_wandb():
                     static_artifact = wandb.Artifact(
                         "cebra-static-plots", type="evaluation"
                     )
@@ -281,11 +270,11 @@ def main(cfg: AppConfig) -> None:
                 backend=cfg.evaluation.knn_backend,
                 faiss_gpu_id=cfg.evaluation.faiss_gpu_id,
             )
-            if _should_log_to_wandb():
+            if should_log_to_wandb():
                 wandb.log({"knn_accuracy": accuracy})
             report_path = output_dir / "classification_report.json"
             pd.Series(report).to_json(report_path, indent=4)
-            if _should_log_to_wandb():
+            if should_log_to_wandb():
                 report_artifact = wandb.Artifact(
                     name=report_path.stem, type="evaluation"
                 )
@@ -322,7 +311,7 @@ def main(cfg: AppConfig) -> None:
                 backend=cfg.evaluation.knn_backend,
                 faiss_gpu_id=cfg.evaluation.faiss_gpu_id,
             )
-            if _should_log_to_wandb():
+            if should_log_to_wandb():
                 wandb.log({"knn_regression_mse": mse, "knn_regression_r2": r2})
 
         # --- 7. Consistency Check ---
@@ -363,7 +352,7 @@ def main(cfg: AppConfig) -> None:
                     log_to_wandb=True,
                 )
     finally:
-        if _should_log_to_wandb():
+        if should_log_to_wandb():
             wandb.finish()
 
     print("\n--- Pipeline Complete ---")
