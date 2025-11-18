@@ -16,20 +16,24 @@ if str(REPO_ROOT) not in sys.path:
 
 from src.config_schema import AppConfig
 from src.data import load_and_prepare_dataset
-from src.plotting import (
-    prepare_plot_labels,
-    render_discrete_visualizations,
-    render_continuous_visualizations,
-)
-from src.results import save_interactive_plot
+from src.plotting import prepare_plot_labels
+from src.results import save_interactive_plot, save_static_2d_plots
 from src.utils import (
-    find_run_dirs,
-    prepare_app_config,
+    apply_reproducibility,
+    get_embedding_cache_path,
+    load_text_embedding,
+    save_text_embedding,
 )
-from src.embeddings import load_or_generate_embeddings
+from src.embeddings import (
+    get_embeddings,
+    get_last_hidden_state_cache,
+    clear_last_hidden_state_cache,
+    resolve_layer_index,
+)
 from src.cebra_trainer import (
     load_cebra_model,
     transform_cebra,
+    normalize_model_architecture,
 )
 
 
@@ -56,10 +60,9 @@ def _resolve_device(requested: Optional[str]) -> str:
             idx = int(idx_str)
         except ValueError as exc:
             raise ValueError(f"Invalid CUDA device specification: '{requested}'.") from exc
-        device_count = torch.cuda.device_count()
-        if idx < 0 or idx >= device_count:
+        if idx < 0 or idx >= torch.cuda.device_count():
             raise ValueError(
-                f"CUDA device index {idx} is out of range. Available GPUs: {device_count}."
+                f"CUDA device index {idx} is out of range. Available GPUs: {torch.cuda.device_count()}."
             )
         return f"cuda:{idx}"
     raise ValueError(f"Unsupported device specification '{requested}'.")
@@ -73,14 +76,29 @@ def _load_cfg(run_dir: Path, *, device_override: Optional[str] = None) -> AppCon
 
     hydra_cfg = OmegaConf.load(hydra_cfg_path)
 
-    if device_override is not None:
-        device = _resolve_device(device_override)
-    else:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
+    default_cfg = OmegaConf.structured(AppConfig)
+    cfg = OmegaConf.merge(default_cfg, hydra_cfg)
+    OmegaConf.set_struct(cfg, False)
 
-    cfg = prepare_app_config(hydra_cfg, device_override=device)
+    cfg.cebra.conditional = cfg.cebra.conditional.lower()
+    cfg.cebra.model_architecture = normalize_model_architecture(
+        getattr(cfg.cebra, "model_architecture", "offset0-model")
+    )
+    cfg.device = (
+        _resolve_device(device_override)
+        if device_override is not None
+        else ("cuda" if torch.cuda.is_available() else "cpu")
+    )
 
     return cfg
+
+
+def _find_run_dirs(results_root: Path, run_id: str) -> List[Path]:
+    matches: List[Path] = []
+    for marker in results_root.rglob("wandb_run_id.txt"):
+        if marker.read_text().strip() == run_id:
+            matches.append(marker.parent)
+    return sorted(matches)
 
 
 def _collect_run_ids(
@@ -125,14 +143,55 @@ def _resolve_visualization_paths(
     if cfg.cebra.conditional == "discrete":
         expected_static = [
             viz_dir / "static_PCA_plot.png",
+            viz_dir / "static_PCA_plot.svg",
             viz_dir / "static_UMAP_plot.png",
+            viz_dir / "static_UMAP_plot.svg",
         ]
     return viz_dir, interactive_path, expected_static, conditional_desc
 
 
 def _prepare_base_embeddings(cfg: AppConfig, ids: Iterable, texts: List[str]) -> np.ndarray:
     """Reuse cached embeddings when possible, otherwise recompute."""
-    return load_or_generate_embeddings(cfg, texts, ids)
+    cache_path = get_embedding_cache_path(cfg)
+    cache = load_text_embedding(cache_path)
+    if cache is not None:
+        cached_ids, cached_embeddings, _, cached_layer_embeddings = cache
+        id_to_index = {str(i): idx for idx, i in enumerate(cached_ids)}
+        try:
+            selection_indices = np.asarray(
+                [id_to_index[str(i)] for i in ids], dtype=int
+            )
+        except KeyError:
+            selection_indices = None
+
+        if selection_indices is not None:
+            if cfg.embedding.type == "hf_transformer" and cached_layer_embeddings is not None:
+                layer_idx = resolve_layer_index(
+                    cached_layer_embeddings.shape[1],
+                    getattr(cfg.embedding, "hidden_state_layer", None),
+                )
+                return cached_layer_embeddings[selection_indices, layer_idx, :]
+            return np.asarray(cached_embeddings[selection_indices])
+
+    embeddings = get_embeddings(texts, cfg)
+    # get_embeddings caches the full hidden-state tensor internally; stash for reuse
+    layer_cache = get_last_hidden_state_cache()
+    if layer_cache is not None and layer_cache.shape[0] != embeddings.shape[0]:
+        layer_cache = None  # fallback if cache mismatched
+    seed = (
+        getattr(cfg.dataset, "shuffle_seed", None)
+        if getattr(cfg.dataset, "shuffle_seed", None) is not None
+        else getattr(getattr(cfg, "evaluation", None), "random_state", None)
+    )
+    save_text_embedding(
+        ids,
+        embeddings,
+        seed,
+        cache_path,
+        layer_embeddings=layer_cache,
+    )
+    clear_last_hidden_state_cache()
+    return embeddings
 
 
 def _load_cebra_embeddings(
@@ -141,10 +200,8 @@ def _load_cebra_embeddings(
     base_embeddings: Optional[np.ndarray],
     *,
     batch_size: int = 4096,
-    embeddings_path: Optional[Path] = None,
 ) -> Optional[np.ndarray]:
-    if embeddings_path is None:
-        embeddings_path = run_dir / "cebra_embeddings.npy"
+    embeddings_path = run_dir / "cebra_embeddings.npy"
     if embeddings_path.exists():
         return np.load(embeddings_path)
 
@@ -219,6 +276,7 @@ def _generate_visualizations(
 ) -> Literal["generated", "skipped_existing", "missing_artifacts"]:
     print(f"\nProcessing run {run_id} at {run_dir}")
     cfg = _load_cfg(run_dir, device_override=device_override)
+    apply_reproducibility(cfg)
 
     viz_dir, interactive_path, expected_static, conditional_desc = _resolve_visualization_paths(
         cfg, run_dir
@@ -242,7 +300,6 @@ def _generate_visualizations(
         cfg,
         base_embeddings,
         batch_size=cebra_batch_size,
-        embeddings_path=embeddings_path,
     )
     if cebra_embeddings is None:
         return "missing_artifacts"
@@ -250,21 +307,26 @@ def _generate_visualizations(
 
     viz_dir.mkdir(parents=True, exist_ok=True)
 
+    save_interactive_plot(
+        embeddings=cebra_embeddings,
+        text_labels=labels,
+        output_dim=cfg.cebra.output_dim,
+        palette=palette,
+        title=f"{cfg.dataset.name} · {run_id} ({conditional_desc})",
+        output_path=interactive_path,
+    )
+
     if cfg.cebra.conditional == "discrete":
-        render_discrete_visualizations(
-            cfg,
-            cebra_embeddings,
-            labels,
-            viz_dir,
-            interactive_path=interactive_path,
-        )
-    else:
-        render_continuous_visualizations(
-            cfg,
-            cebra_embeddings,
-            labels,
-            viz_dir,
-            interactive_path=interactive_path,
+        hue_order = order if order else sorted(set(labels))
+        save_static_2d_plots(
+            embeddings=cebra_embeddings,
+            text_labels=labels,
+            palette=palette,
+            title_prefix=f"{cfg.dataset.name} {cfg.embedding.name} ({cfg.cebra.output_dim}D) ",
+            output_dir=viz_dir,
+            hue_order=hue_order,
+            cfg=cfg,
+            log_to_wandb=False,
         )
 
     return "generated"
@@ -361,7 +423,7 @@ def _drive(
     scheduled: List[Tuple[str, Path]] = []
     missing = 0
     for run_id in run_ids:
-        matches = find_run_dirs(results_root, run_id)
+        matches = _find_run_dirs(results_root, run_id)
         if not matches:
             print(f"[WARN] No results directory found for run ID {run_id}")
             missing += 1

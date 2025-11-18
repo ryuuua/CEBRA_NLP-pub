@@ -12,7 +12,7 @@ import umap
 import numpy as np
 from pathlib import Path
 from sklearn.decomposition import PCA
-from typing import Optional
+from typing import Iterable, Optional
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import (
     accuracy_score,
@@ -113,6 +113,13 @@ def _to_cpu_numpy(array):
     if isinstance(array, np.ndarray):
         return array
     return np.asarray(array)
+
+
+def _save_with_svg(fig: plt.Figure, path: Path) -> None:
+    """Save figure to PNG and SVG with consistent DPI."""
+    fig.savefig(path, dpi=300)
+    svg_path = path.with_suffix(".svg")
+    fig.savefig(svg_path, format="svg", dpi=300)
 
 
 def _resolve_faiss_backend(use_gpu: bool | None, *, strict: bool = False) -> tuple[bool, bool]:
@@ -433,7 +440,7 @@ def save_static_2d_plots(
         )
 
     for X_reduced, name in [(X_pca, "PCA"), (X_umap, "UMAP")]:
-        plt.figure(figsize=(12, 10))
+        fig, ax = plt.subplots(figsize=(12, 10))
         sns.scatterplot(
             x=X_reduced[:, 0],
             y=X_reduced[:, 1],
@@ -441,19 +448,20 @@ def save_static_2d_plots(
             palette=palette,
             s=10,
             hue_order=hue_order,
+            ax=ax,
         )
-        plt.title(f"{title_prefix} with {name}")
+        ax.set_title(f"{title_prefix} with {name}")
         if name == "PCA":
-            plt.xlabel(f"{name} 1 ({variance_ratios[0] * 100:.1f}%)")
-            plt.ylabel(f"{name} 2 ({variance_ratios[1] * 100:.1f}%)")
+            ax.set_xlabel(f"{name} 1 ({variance_ratios[0] * 100:.1f}%)")
+            ax.set_ylabel(f"{name} 2 ({variance_ratios[1] * 100:.1f}%)")
         else:
-            plt.xlabel(f"{name} 1")
-            plt.ylabel(f"{name} 2")
-        plt.legend(title="Label", bbox_to_anchor=(1.05, 1), loc="upper left")
-        plt.tight_layout()
+            ax.set_xlabel(f"{name} 1")
+            ax.set_ylabel(f"{name} 2")
+        ax.legend(title="Label", bbox_to_anchor=(1.05, 1), loc="upper left")
+        fig.tight_layout()
         static_plot_file = output_dir / f"static_{name}_plot.png"
-        plt.savefig(static_plot_file)
-        plt.close()
+        _save_with_svg(fig, static_plot_file)
+        plt.close(fig)
         print(f"Saved static {name} plot to {static_plot_file}")
 
 
@@ -561,7 +569,7 @@ def run_knn_classification(
             disp.plot(cmap=plt.cm.Blues, ax=ax, xticks_rotation="vertical")
         ax.set_title(f"Confusion Matrix (k-NN={knn_neighbors})")
         plt.tight_layout()
-        plt.savefig(cm_plot_file)
+        _save_with_svg(fig, cm_plot_file)
         plt.close(fig)
         print(f"Saved confusion matrix to {cm_plot_file}")
 
@@ -690,7 +698,7 @@ def run_consistency_check(
         if enable_plots:
             ax = plot_consistency(scores, pairs, ids_runs)
             plot_path = output_dir / "consistency_plot_datasets.png"
-            ax.figure.savefig(plot_path)
+            _save_with_svg(ax.figure, plot_path)
             plt.close(ax.figure)
             if log_to_wandb:
                 wandb.save(str(plot_path))
@@ -754,10 +762,7 @@ def run_consistency_check(
         if enable_plots:
             ax = plot_consistency(scores, pairs, ids_runs)
             plot_path = output_dir / f"consistency_plot_{name}.png"
-
-            ax.figure.savefig(plot_path)
-
-            # Figureを閉じる
+            _save_with_svg(ax.figure, plot_path)
             plt.close(ax.figure)
             if log_to_wandb:
                 wandb.save(str(plot_path))
@@ -783,8 +788,7 @@ def run_consistency_check(
         if enable_plots:
             ax = plot_consistency(scores, pairs, ids_datasets)
             plot_path = output_dir / "consistency_plot_datasets.png"
-
-            ax.figure.savefig(plot_path)
+            _save_with_svg(ax.figure, plot_path)
             plt.close(ax.figure)
             if log_to_wandb:
                 wandb.save(str(plot_path))
