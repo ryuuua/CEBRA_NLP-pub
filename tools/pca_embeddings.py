@@ -3,7 +3,6 @@ import numpy as np
 import pandas as pd
 from hydra.core.hydra_config import HydraConfig
 from hydra.utils import get_original_cwd
-from omegaconf import OmegaConf
 from pathlib import Path
 from sklearn.decomposition import PCA
 from typing import Optional, Sequence, Tuple
@@ -11,9 +10,12 @@ from typing import Optional, Sequence, Tuple
 from src.config_schema import AppConfig
 from src.data import load_and_prepare_dataset
 from src.embeddings import load_or_generate_embeddings
-from src.plotting import prepare_plot_labels
-from src.results import save_interactive_plot
-from src.utils import apply_reproducibility
+from src.plotting import (
+    prepare_plot_labels,
+    render_discrete_visualizations,
+    render_continuous_visualizations,
+)
+from src.utils import prepare_app_config
 
 
 def _resolve_rng_seed(cfg: AppConfig) -> Optional[int]:
@@ -130,11 +132,7 @@ def _resolve_export_dir(run_dir: Path, cfg: AppConfig) -> Path:
 
 @hydra.main(config_path="conf", config_name="config", version_base="1.2")
 def run(cfg: AppConfig) -> None:
-    default_cfg = OmegaConf.structured(AppConfig)
-    cfg = OmegaConf.merge(default_cfg, cfg)
-    OmegaConf.set_struct(cfg, False)
-    cfg.cebra.conditional = cfg.cebra.conditional.lower()
-    apply_reproducibility(cfg)
+    cfg = prepare_app_config(cfg)
 
     output_dir = Path(HydraConfig.get().run.dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -182,29 +180,14 @@ def run(cfg: AppConfig) -> None:
     interactive_2d = export_dir / "pca_embeddings_2d.html"
     interactive_3d = export_dir / "pca_embeddings_3d.html"
 
-    if plot_embeddings.shape[1] >= 2:
-        save_interactive_plot(
-            embeddings=plot_embeddings,
-            text_labels=plot_labels,
-            output_dim=2,
-            palette=palette,
-            title=f"{title_base} (2D)",
-            output_path=interactive_2d,
-        )
-    else:
-        print("[WARN] PCA produced fewer than 2 components; skipping 2D plot.")
-
-    if plot_embeddings.shape[1] >= 3:
-        save_interactive_plot(
-            embeddings=plot_embeddings,
-            text_labels=plot_labels,
-            output_dim=3,
-            palette=palette,
-            title=f"{title_base} (3D)",
-            output_path=interactive_3d,
-        )
-    else:
-        print("[WARN] PCA produced fewer than 3 components; skipping 3D plot.")
+    render_discrete_visualizations(
+        cfg,
+        plot_embeddings,
+        plot_labels,
+        export_dir,
+        interactive_path=interactive_2d if plot_embeddings.shape[1] >= 2 else None,
+        wandb_hook=None,
+    )
 
     print("\n--- PCA analysis complete ---")
 

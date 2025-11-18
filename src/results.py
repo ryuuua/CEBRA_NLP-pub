@@ -12,7 +12,7 @@ import umap
 import numpy as np
 from pathlib import Path
 from sklearn.decomposition import PCA
-from typing import Optional
+from typing import Iterable, Optional
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.metrics import (
     accuracy_score,
@@ -21,7 +21,6 @@ from sklearn.metrics import (
     confusion_matrix,
 )
 import os
-import tempfile
 import wandb
 from tqdm import tqdm
 from .config_schema import AppConfig
@@ -116,6 +115,13 @@ def _to_cpu_numpy(array):
     return np.asarray(array)
 
 
+def _save_with_svg(fig: plt.Figure, path: Path) -> None:
+    """Save figure to PNG and SVG with consistent DPI."""
+    fig.savefig(path, dpi=300)
+    svg_path = path.with_suffix(".svg")
+    fig.savefig(svg_path, format="svg", dpi=300)
+
+
 def _resolve_faiss_backend(use_gpu: bool | None, *, strict: bool = False) -> tuple[bool, bool]:
     """Return (is_available, use_gpu) for FAISS based on requested policy."""
     if not _FAISS_AVAILABLE:
@@ -173,19 +179,31 @@ def _faiss_weighted_classification(
     all_labels: np.ndarray,
 ) -> np.ndarray:
     """Compute weighted majority votes given neighbor labels and weights."""
-    label_to_pos = {int(label): idx for idx, label in enumerate(all_labels)}
     num_queries, k_neighbors = neighbor_labels.shape
     num_classes = len(all_labels)
-    
-    # Vectorized: convert neighbor_labels to position indices
-    label_positions = np.array([
-        [label_to_pos[int(lbl)] for lbl in neighbor_labels[row]]
-        for row in range(num_queries)
-    ], dtype=np.int64)
-    
+
+    labels_int = np.asarray(all_labels, dtype=np.int64)
+    if labels_int.size == 0:
+        raise ValueError("all_labels must contain at least one entry.")
+    min_label = int(labels_int.min())
+    max_label = int(labels_int.max())
+    lookup_size = max_label - min_label + 1
+    lookup = np.full(lookup_size, -1, dtype=np.int64)
+    lookup[labels_int - min_label] = np.arange(num_classes, dtype=np.int64)
+
+    neighbor_int = neighbor_labels.astype(np.int64, copy=False)
+    offsets = neighbor_int - min_label
+    if np.any((offsets < 0) | (offsets >= lookup_size)):
+        raise KeyError("Neighbor label not present in all_labels for FAISS classification.")
+
+    label_positions = np.take(lookup, offsets)
+
     # Use advanced indexing for vectorized accumulation
     scores = np.zeros((num_queries, num_classes), dtype=np.float64)
-    query_indices = np.arange(num_queries)[:, None].repeat(k_neighbors, axis=1)
+    query_indices = np.broadcast_to(
+        np.arange(num_queries, dtype=np.int64)[:, None],
+        label_positions.shape,
+    )
     np.add.at(scores, (query_indices, label_positions), weights)
 
     predicted_indices = scores.argmax(axis=1)
@@ -422,7 +440,7 @@ def save_static_2d_plots(
         )
 
     for X_reduced, name in [(X_pca, "PCA"), (X_umap, "UMAP")]:
-        plt.figure(figsize=(12, 10))
+        fig, ax = plt.subplots(figsize=(12, 10))
         sns.scatterplot(
             x=X_reduced[:, 0],
             y=X_reduced[:, 1],
@@ -430,19 +448,20 @@ def save_static_2d_plots(
             palette=palette,
             s=10,
             hue_order=hue_order,
+            ax=ax,
         )
-        plt.title(f"{title_prefix} with {name}")
+        ax.set_title(f"{title_prefix} with {name}")
         if name == "PCA":
-            plt.xlabel(f"{name} 1 ({variance_ratios[0] * 100:.1f}%)")
-            plt.ylabel(f"{name} 2 ({variance_ratios[1] * 100:.1f}%)")
+            ax.set_xlabel(f"{name} 1 ({variance_ratios[0] * 100:.1f}%)")
+            ax.set_ylabel(f"{name} 2 ({variance_ratios[1] * 100:.1f}%)")
         else:
-            plt.xlabel(f"{name} 1")
-            plt.ylabel(f"{name} 2")
-        plt.legend(title="Label", bbox_to_anchor=(1.05, 1), loc="upper left")
-        plt.tight_layout()
+            ax.set_xlabel(f"{name} 1")
+            ax.set_ylabel(f"{name} 2")
+        ax.legend(title="Label", bbox_to_anchor=(1.05, 1), loc="upper left")
+        fig.tight_layout()
         static_plot_file = output_dir / f"static_{name}_plot.png"
-        plt.savefig(static_plot_file)
-        plt.close()
+        _save_with_svg(fig, static_plot_file)
+        plt.close(fig)
         print(f"Saved static {name} plot to {static_plot_file}")
 
 
@@ -550,7 +569,7 @@ def run_knn_classification(
             disp.plot(cmap=plt.cm.Blues, ax=ax, xticks_rotation="vertical")
         ax.set_title(f"Confusion Matrix (k-NN={knn_neighbors})")
         plt.tight_layout()
-        plt.savefig(cm_plot_file)
+        _save_with_svg(fig, cm_plot_file)
         plt.close(fig)
         print(f"Saved confusion matrix to {cm_plot_file}")
 
@@ -679,7 +698,7 @@ def run_consistency_check(
         if enable_plots:
             ax = plot_consistency(scores, pairs, ids_runs)
             plot_path = output_dir / "consistency_plot_datasets.png"
-            ax.figure.savefig(plot_path)
+            _save_with_svg(ax.figure, plot_path)
             plt.close(ax.figure)
             if log_to_wandb:
                 wandb.save(str(plot_path))
@@ -692,50 +711,37 @@ def run_consistency_check(
     original_persistent = cfg.cebra.persistent_workers
     cfg.cebra.persistent_workers = False
 
-    model_paths = []
-    for i in tqdm(range(num_runs), desc="Training models for consistency check"):
-        arch = normalize_model_architecture(cfg.cebra.model_architecture)
+    arch = normalize_model_architecture(cfg.cebra.model_architecture)
+    cebra_params = cfg.cebra.params
+    batch_size = cebra_params.get("batch_size", 512)
+    learning_rate = cebra_params.get("learning_rate", 1e-3)
+    conditional_mode = (
+        None if cfg.cebra.conditional == "None" else cfg.cebra.conditional
+    )
+
+    train_embeddings = []
+    valid_embeddings = []
+    for _ in tqdm(range(num_runs), desc="Training models for consistency check"):
         model = cebra.CEBRA(
             model_architecture=arch,
             output_dimension=cfg.cebra.output_dim,
             max_iterations=cfg.cebra.max_iterations,
-            batch_size=cfg.cebra.params.get("batch_size", 512),
-            learning_rate=cfg.cebra.params.get("learning_rate", 1e-3),
-            conditional=(
-                None if cfg.cebra.conditional == "None" else cfg.cebra.conditional
-            ),
+            batch_size=batch_size,
+            learning_rate=learning_rate,
+            conditional=conditional_mode,
             device=cfg.device,
         )
         if y_train is None:
             model.fit(X_train)
         else:
             model.fit(X_train, y_train)
-        with tempfile.NamedTemporaryFile(
-            delete=False,
-            suffix=".pt",
-            prefix=f"cebra_consistency_{os.getpid()}_{i}_",
-        ) as tmp:
-            tmp_file = Path(tmp.name)
-        model.save(str(tmp_file))
-        model_paths.append(tmp_file)
+
+        train_embeddings.append(model.transform(X_train))
+        valid_embeddings.append(model.transform(X_valid))
+
         del model
         gc.collect()
         clear_cuda_cache()
-
-    train_embeddings = []
-    valid_embeddings = []
-    for tmp_file in tqdm(model_paths, desc="Transforming with saved models"):
-        loaded_model = None
-        try:
-            loaded_model = cebra.CEBRA.load(str(tmp_file))
-            train_embeddings.append(loaded_model.transform(X_train))
-            valid_embeddings.append(loaded_model.transform(X_valid))
-        finally:
-            if loaded_model is not None:
-                del loaded_model
-            tmp_file.unlink(missing_ok=True)
-            gc.collect()
-            clear_cuda_cache()
 
     train_mean = valid_mean = None
     for name, embeddings in [("train", train_embeddings), ("valid", valid_embeddings)]:
@@ -756,10 +762,7 @@ def run_consistency_check(
         if enable_plots:
             ax = plot_consistency(scores, pairs, ids_runs)
             plot_path = output_dir / f"consistency_plot_{name}.png"
-
-            ax.figure.savefig(plot_path)
-
-            # Figureを閉じる
+            _save_with_svg(ax.figure, plot_path)
             plt.close(ax.figure)
             if log_to_wandb:
                 wandb.save(str(plot_path))
@@ -785,8 +788,7 @@ def run_consistency_check(
         if enable_plots:
             ax = plot_consistency(scores, pairs, ids_datasets)
             plot_path = output_dir / "consistency_plot_datasets.png"
-
-            ax.figure.savefig(plot_path)
+            _save_with_svg(ax.figure, plot_path)
             plt.close(ax.figure)
             if log_to_wandb:
                 wandb.save(str(plot_path))
