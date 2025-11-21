@@ -9,6 +9,8 @@ embedding=bert,roberta,sentence_bert,embeddinggemma,granite_embedding,jina_embed
 cebra : you can use any cebra models and criterions available.
 visualiation setting : if the output_dim of cebra are above 3,plottings are produced usig UMAP and PCA to reduce dim to 2 for visualization.
 
+For Hugging Face transformer embeddings you can now choose how sentence vectors are pooled. Set `pooling: mean` (default) or `pooling: cls` inside `conf/embedding/<name>.yaml`, or override at runtime with `embedding.pooling=cls`, to toggle between mean pooling and using the `[CLS]` token.
+
 
 ### Defalut setting
 ```

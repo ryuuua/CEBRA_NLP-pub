@@ -3,3 +3,4 @@ name: bert-base-uncased
 type: hf_transformer # Type identifier for the script
 model_name: 'bert-base-uncased'
 output_dim: 768
+pooling: mean  # Use 'cls' to take the [CLS] token instead of mean pooling
