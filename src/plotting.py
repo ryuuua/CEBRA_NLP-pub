@@ -9,6 +9,7 @@ from omegaconf import DictConfig, OmegaConf
 
 from src.config_schema import AppConfig
 from src.utils import normalize_binary_labels
+from src.results import save_interactive_plot, save_static_2d_plots
 
 
 def prepare_plot_labels(
