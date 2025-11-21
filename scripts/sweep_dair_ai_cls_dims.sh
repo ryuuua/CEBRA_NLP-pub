@@ -14,7 +14,6 @@ BASE_CMD=(
   dataset=dair-ai
   embedding=bert
   embedding.pooling=cls
-  visualization
   cebra=offset1-model-mse-lr
   evaluation.enable_plots=true
   wandb.project="CEBRA_NLP_CLS_Experiment-dair-ai"
