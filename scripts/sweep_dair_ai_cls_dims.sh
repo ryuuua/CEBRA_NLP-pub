@@ -14,6 +14,7 @@ BASE_CMD=(
   dataset=dair-ai
   embedding=bert
   embedding.pooling=cls
+  visualization
   cebra=offset1-model-mse-lr
   evaluation.enable_plots=true
   wandb.project="CEBRA_NLP_CLS_Experiment-dair-ai"
@@ -27,7 +28,7 @@ run_subset() {
     CUDA_VISIBLE_DEVICES="${gpu_id}" \
       "${BASE_CMD[@]}" \
       cebra.output_dim="${dim}" \
-      wandb.name="dair-ai-cls-d${dim}" \
+      wandb.run_name="dair-ai-cls-d${dim}" \
       > "${LOG_DIR}/dim${dim}.out" 2> "${LOG_DIR}/dim${dim}.err"
   done
 }
