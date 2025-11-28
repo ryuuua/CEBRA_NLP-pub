@@ -1,6 +1,13 @@
 # CEBRA_NLP
 
-This project aims to use CEBRA to construct latent space with identifiability in a text embedding model's representation.
+This project aims to identify of high-dimensional language embeddings by using CEBRA, a contarstive learning framework leveraging auxiliary variables for identifiable representation learning.
+
+## CEBRA
+CEBRA, originally developed for neural data, is a library for representation learning with rich configurability. (Schneider et al. 2023) https://github.com/AdaptiveMotorControlLab/cebra 
+
+In this contrastive framework, the conditional distribution of positive and negative samples should be differ in "non-trivial" way.
+Thus, it is important to adopt appropriate auxiiary variables to satisfy that condition.
+
 
 ## Setting 
 dateset=dair-ai,go_emotions,ag_news,imdb,
