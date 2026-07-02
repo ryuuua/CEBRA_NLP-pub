@@ -3,6 +3,23 @@
 Minimal public tutorial pipeline for text embeddings, CEBRA training, trajectory
 rendering, and MP4/GIF/PNG video artifacts.
 
+## Acknowledgement
+
+This repository is a downstream NLP tutorial and visualization pipeline built
+on the original CEBRA method and software. The core CEBRA model and training
+concepts come from:
+
+- Paper: Schneider, S., Lee, J. H. & Mathis, M. W. "Learnable latent embeddings
+  for joint behavioural and neural analysis." Nature 617, 360-368 (2023).
+  https://doi.org/10.1038/s41586-023-06031-6
+- Official CEBRA repository: https://github.com/AdaptiveMotorControlLab/CEBRA
+
+This project is not an official CEBRA release. It depends on the public
+`cebra` Python package and adds NLP dataset configs, embedding-cache utilities,
+and trajectory/video tutorial wrappers around that foundation. We gratefully
+acknowledge the CEBRA authors and maintainers. See
+[docs/ATTRIBUTION.md](docs/ATTRIBUTION.md) and [CITATION.cff](CITATION.cff).
+
 The default tutorial uses a tiny CSV dataset and `embedding=sentence_bert`
 (`sentence-transformers/all-MiniLM-L6-v2`) on CPU.
 
@@ -125,3 +142,8 @@ environment. See [docs/EXTERNAL_TESTING.md](docs/EXTERNAL_TESTING.md).
 ## License
 
 MIT
+
+This repository is a downstream project built on CEBRA. CEBRA itself is
+developed by the upstream CEBRA authors and released separately; see the
+official repository and license:
+https://github.com/AdaptiveMotorControlLab/CEBRA
