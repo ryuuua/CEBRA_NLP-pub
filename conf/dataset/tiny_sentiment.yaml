@@ -1,0 +1,18 @@
+# @package dataset
+
+name: tiny_sentiment
+source: csv
+data_files: examples/tiny_sentiment.csv
+text_column: text
+label_column: label
+shuffle: false
+
+label_map:
+  0: "negative"
+  1: "positive"
+
+visualization:
+  emotion_order: ["negative", "positive"]
+  emotion_colors:
+    negative: "#D55E00"
+    positive: "#009E73"

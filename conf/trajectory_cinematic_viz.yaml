@@ -1,0 +1,6 @@
+# Entry-point config for the cinematic trajectory visualization stage.
+
+defaults:
+  - config
+  - override stage: trajectory_cinematic_viz
+  - _self_

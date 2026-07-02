@@ -1,0 +1,6 @@
+# Entry-point config for the training stage.
+
+defaults:
+  - config
+  - override stage: train
+  - _self_

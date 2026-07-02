@@ -1,0 +1,17 @@
+# @package trajectory_analysis
+enabled: false
+checkpoint_every_n_steps: 100
+save_initial_checkpoint: true
+save_final_checkpoint: true
+render_after_train: true
+centroid_scope: train
+render_dims: 3
+include_sample_cloud: true
+export_animation: true
+export_static_panels: true
+show_centroids: true
+show_trajectory_lines: true
+export_clean_variant: false
+render_checkpoint_stride: 1
+fps: 8
+max_frames: 180

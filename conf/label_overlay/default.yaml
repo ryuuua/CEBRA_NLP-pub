@@ -1,0 +1,9 @@
+# @package label_overlay
+
+enabled: false
+cache_in_cache_stage: true
+text_mode: label_name
+show_in_cebra_space: true
+show_in_pca: true
+show_centroids_in_pca: true
+include_split_views: true

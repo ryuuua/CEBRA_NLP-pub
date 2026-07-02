@@ -1,0 +1,35 @@
+# @package embedding
+
+# Defaults for optional embedding runtime knobs.
+# Keeping these here makes Hydra CLI overrides like `embedding.batch_size=64`
+# work without needing the `+` prefix.
+
+batch_size: 32
+torch_dtype: float32
+
+# Parallel strategy. Override with Hydra, for example
+# `embedding.parallel_strategy=ddp`.
+# Values: auto | single | ddp | pipeline2
+parallel_strategy: auto
+
+# HF Transformers (large models)
+device_map: null
+max_memory: null
+
+# HF Transformers (small models)
+data_parallel: false
+
+# SentenceTransformers
+multi_process: false
+multi_process_devices: null
+
+# Shared / misc
+trust_remote_code: false
+hidden_state_layer: null
+cache_all_layers: false
+cache_tag: null
+embedding_seed: null
+normalize_embeddings: false
+# Pooling override is only honored for embedding.type=hf_transformer.
+# sentence_transformer uses backend-defined pooling.
+pooling: mean

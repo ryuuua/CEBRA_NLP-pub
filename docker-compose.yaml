@@ -1,0 +1,10 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: cebra-nlp-public:latest
+    working_dir: /app
+    command: python scripts/run_tutorial_video.py --workdir runs/tutorial_video --force
+    volumes:
+      - ./runs:/app/runs

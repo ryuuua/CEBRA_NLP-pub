@@ -1,0 +1,3 @@
+# @package label_randomization
+mode: none        # none | permutation | random_int
+num_classes: null # optional override when mode=random_int; defaults to unique label count

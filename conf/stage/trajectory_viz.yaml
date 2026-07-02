@@ -1,0 +1,9 @@
+# @package stage
+name: trajectory_viz
+require_cache: true
+require_model: true
+run_tag: null
+save_splits: false
+use_saved_splits: true
+use_saved_embeddings: true
+model_path: null

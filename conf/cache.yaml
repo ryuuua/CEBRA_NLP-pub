@@ -1,0 +1,6 @@
+# Entry-point config for the embedding cache stage.
+
+defaults:
+  - config
+  - override stage: cache
+  - _self_

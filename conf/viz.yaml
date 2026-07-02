@@ -1,0 +1,6 @@
+# Entry-point config for the visualization stage.
+
+defaults:
+  - config
+  - override stage: viz
+  - _self_

@@ -1,0 +1,75 @@
+# Base config shared by all stages.
+
+defaults:
+  - stage: train
+  - paths: default
+  - dataset: tiny_sentiment
+  - embedding_defaults
+  - embedding: sentence_bert
+  - embedding_collection: null
+  - pca_analysis: default
+  - cebra: offset1-model
+  - consistency_check: default
+  - hpt: default
+  - label_overlay: default
+  - trajectory_analysis: default
+  - cinematic_render: default
+  - label_randomization: default
+  - _self_
+
+device: cpu
+
+reproducibility:
+  seed: 7
+  deterministic: false
+  cudnn_benchmark: false
+
+evaluation:
+  test_size: 0.2
+  random_state: 42
+  knn_neighbors: 5
+  enable_plots: false
+  knn_backend: auto
+  faiss_gpu_id: 0
+  local_linearity_probe:
+    enabled: true
+    neighbors: 15
+    sample_size: 500
+    random_state: 42
+    ridge_alpha: 1e-3
+    store_scores: false
+
+wandb:
+  project: ""
+  run_name: "default_run"
+  entity: null
+
+cebra:
+  save_epoch_trajectory: false
+  trajectory_every_n_epochs: 1
+  trajectory_sample_size: 1000
+  trajectory_fps: 8
+  trajectory_max_frames: 180
+  trajectory_one_epoch_one_frame: false
+  trajectory_connect_segments: true
+  trajectory_rotate_camera: false
+  trajectory_camera_elev: 18.0
+  trajectory_camera_azim: 42.0
+  trajectory_trail_length: 10
+  trajectory_axis_padding: 0.08
+  trajectory_frame_width: 1920
+  trajectory_frame_height: 1080
+  trajectory_dpi: 180
+  trajectory_mp4_crf: 18
+  trajectory_mp4_preset: slow
+
+# Runtime launchers may override these values.
+# Kept for schema completeness.
+ddp:
+  world_size: 1
+  rank: 0
+  local_rank: 0
+
+hydra:
+  run:
+    dir: runs/${stage.name}/${dataset.name}/${embedding.name}/${cebra.name}/${now:%Y-%m-%d_%H-%M-%S}

@@ -1,0 +1,4 @@
+embedding_cache_dir: ${oc.env:CEBRA_NLP_CACHE_DIR, "artifacts/cache/embeddings"}
+model_dir: ${oc.env:CEBRA_NLP_MODEL_DIR, "artifacts/models"}
+kaggle_data_dir: "data/kaggle/hierarchical-text-classification"
+embedding_cache_tag: null

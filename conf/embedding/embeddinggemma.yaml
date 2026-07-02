@@ -1,0 +1,5 @@
+# @package embedding
+name: google/embeddinggemma-300m
+type: sentence_transformer
+model_name: "google/embeddinggemma-300m"
+output_dim: 1024

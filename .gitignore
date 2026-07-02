@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# Local environments
+.venv/
+venv/
+.env
+.env.*
+
+# Generated outputs
+artifacts/
+runs/
+outputs/
+multirun/
+wandb/
+
+# Local caches
+.cache/
+
+# OS/editor
+.DS_Store

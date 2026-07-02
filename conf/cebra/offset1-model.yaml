@@ -1,0 +1,25 @@
+# @package cebra
+# A descriptive name for this configuration
+name: offset1-model
+
+model_architecture: offset1-model
+
+# CEBRA-specific parameters
+output_dim: 3
+max_iterations: 8
+conditional: 'discrete'
+criterion: infonce
+num_workers: 0
+pin_memory: false
+persistent_workers: false
+prefetch_factor: 2
+# Save embeddings to disk for reuse
+save_embeddings: true
+# Nested parameters for the model
+params:
+  batch_size: 4
+  learning_rate: 1e-3
+  temperature: 1.0
+  distance: 'cosine' # Different distance metric
+  prior: 'uniform'
+  verbose: True
