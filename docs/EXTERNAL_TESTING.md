@@ -21,9 +21,23 @@ uv run pytest -q tests/test_cache_utils.py tests/test_epoch_trajectory.py
 ## Targeted Tests
 
 ```bash
-pytest -q tests/test_cache_utils.py tests/test_epoch_trajectory.py
+pytest -q tests/test_cache_utils.py tests/test_embedding_cache_adapter.py tests/test_epoch_trajectory.py
 pytest -q tests/test_epoch_trajectory_e2e.py tests/test_trajectory_analysis_e2e.py tests/test_trajectory_cinematic_viz.py
 ```
+
+## labenv_embedding_cache Adapter
+
+The public repo depends on `labenv-embedding-cache>=0.3.2`, so a normal pip or
+uv install should pull the published cache library before running the adapter
+test:
+
+```bash
+pytest -q tests/test_embedding_cache_adapter.py
+```
+
+The fallback path is covered by the same test module through monkeypatched
+import behavior; do not remove the fallback because it keeps source checkouts
+usable when the dependency is intentionally absent.
 
 ## Docker Tutorial
 

@@ -8,9 +8,9 @@ import torch
 import torch.distributed as dist
 
 from . import cache_utils
-from .cache_store import (
-    load_text_embedding as _load_text_embedding,
-    save_text_embedding as _save_text_embedding,
+from .embedding_cache_adapter import (
+    load_embedding_cache as _load_embedding_cache,
+    save_embedding_cache as _save_embedding_cache,
 )
 
 if TYPE_CHECKING:
@@ -71,7 +71,7 @@ def save_text_embedding(
             resolved_metadata = dict(metadata)
         else:
             resolved_metadata = {"repr": repr(metadata)}
-    _save_text_embedding(
+    _save_embedding_cache(
         ids,
         embeddings,
         shuffle_seed,
@@ -82,13 +82,14 @@ def save_text_embedding(
         pooling=pooling,
         rulebook_id=rulebook_id,
         registry_key=registry_key,
-        metadata=resolved_metadata,
+        metadata_payload=resolved_metadata,
     )
 
 
 def load_text_embedding(path: Path, *, load_layer_embeddings: bool = True):
     """Loads cached ids and embeddings from the specified path if it exists."""
-    return _load_text_embedding(path, load_layer_embeddings=load_layer_embeddings)
+    loaded = _load_embedding_cache(path, load_layer_embeddings=load_layer_embeddings)
+    return None if loaded is None else loaded.payload
 
 
 def apply_reproducibility(cfg: "AppConfig") -> None:

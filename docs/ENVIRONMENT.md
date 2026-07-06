@@ -21,6 +21,11 @@ uv sync --extra hf --extra video
 On Linux, uv is configured to resolve `torch` from the PyTorch CPU wheel index.
 The Dockerfile uses the same CPU runtime baseline.
 
+`labenv-embedding-cache>=0.3.2` is a standard dependency for self-describing
+NPZ cache writes and validation. The adapter keeps a built-in neutral fallback
+for source checkouts where the dependency is intentionally removed, but normal
+pip, uv, and Docker installs use the published package.
+
 For validation:
 
 ```bash

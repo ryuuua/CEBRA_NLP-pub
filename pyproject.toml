@@ -13,6 +13,7 @@ authors = [{ name = "CEBRA NLP contributors" }]
 dependencies = [
     "cebra==0.6.1",
     "hydra-core>=1.3",
+    "labenv-embedding-cache>=0.3.2,<0.4",
     "matplotlib>=3.8",
     "numpy==1.26.4",
     "omegaconf>=2.3",

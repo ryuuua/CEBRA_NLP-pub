@@ -7,10 +7,10 @@ from tqdm import tqdm
 
 from .config_schema import AppConfig, EmbeddingConfig  # noqa: F401
 from .cache_metadata import build_cache_metadata as _build_shared_cache_metadata
-from .cache_store import (
-    load_text_embedding,
-    resolve_cache_with_index,
-    save_text_embedding,
+from .cache_store import resolve_cache_with_index
+from .embedding_cache_adapter import (
+    load_embedding_cache,
+    save_embedding_cache,
 )
 from .cache_utils import get_embedding_cache_path
 from .embedding_standards import (
@@ -966,9 +966,9 @@ def load_or_generate_embeddings(
         )
         if resolved is not None:
             read_cache_path = resolved.path
-    loaded = load_text_embedding(read_cache_path, load_layer_embeddings=load_layer_embeddings)
+    loaded = load_embedding_cache(read_cache_path, load_layer_embeddings=load_layer_embeddings)
     if loaded is not None:
-        cache = loaded
+        cache = loaded.payload
         loaded_cache_path = read_cache_path
     if loaded_cache_path is not None and loaded_cache_path != write_cache_path:
         print(f"[cache] Using compatible cache path: {loaded_cache_path}")
@@ -997,7 +997,7 @@ def load_or_generate_embeddings(
             hidden_state_layer = (
                 -1 if raw_hidden_state_layer is None else int(raw_hidden_state_layer)
             )
-            save_text_embedding(
+            save_embedding_cache(
                 ids,
                 embeddings,
                 resolved_seed,
@@ -1014,7 +1014,7 @@ def load_or_generate_embeddings(
                 ),
                 rulebook_id=get_rulebook_id(),
                 registry_key=registry_key,
-                metadata=cache_metadata if cache_metadata is not None else None,
+                metadata_payload=cache_metadata if cache_metadata is not None else None,
             )
 
         def _ddp_gather_first_dim(local: torch.Tensor) -> Optional[torch.Tensor]:
@@ -1055,11 +1055,15 @@ def load_or_generate_embeddings(
             return torch.cat(chunks, dim=0)
 
         def _reload_vectors_from_cache() -> Optional[np.ndarray]:
-            loaded_cache = load_text_embedding(
+            loaded_cache = load_embedding_cache(
                 write_cache_path, load_layer_embeddings=load_layer_embeddings
             )
             return _select_cached_embeddings(
-                loaded_cache, ids, cfg, resolved_seed, require_cache=True
+                None if loaded_cache is None else loaded_cache.payload,
+                ids,
+                cfg,
+                resolved_seed,
+                require_cache=True,
             )
 
         def _gather_layer_cache_for_ddp(

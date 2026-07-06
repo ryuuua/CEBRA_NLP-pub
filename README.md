@@ -132,6 +132,13 @@ The public cache implementation is local and neutral:
 - override cache root: `CEBRA_NLP_CACHE_DIR`
 - override model root: `CEBRA_NLP_MODEL_DIR`
 
+CEBRA-nlp-public uses `labenv-embedding-cache>=0.3.2` as the standard
+self-describing NPZ writer and validator for newly generated embedding caches.
+The adapter does not change the public cache directory, does not add new
+environment variables, and does not expose external execution profiles. The
+built-in neutral cache writer remains as a fallback for source checkouts where
+the dependency is intentionally removed.
+
 Generated artifacts are ignored by default.
 
 ## Validation
