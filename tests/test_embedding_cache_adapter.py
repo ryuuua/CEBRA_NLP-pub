@@ -143,3 +143,51 @@ def test_labenv_v2_adapter_normalizes_public_metadata(monkeypatch, tmp_path: Pat
     assert pooling == "mean"
     assert rulebook_id == "cebra_nlp_public_local_cache_v1"
     assert registry_key == "bert"
+
+
+def test_real_labenv_v04_save_validate_load_round_trip(tmp_path: Path) -> None:
+    import labenv_embedding_cache as lec
+
+    backend = adapter.active_cache_backend()
+    assert backend.enabled is True
+    assert backend.name == "labenv_embedding_cache"
+    assert backend.version is not None
+    assert (0, 4, 0) <= adapter._version_tuple(backend.version) < (0, 5, 0)
+    path = tmp_path / "cache" / "public-v2.npz"
+    expected = np.asarray([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)
+    written = adapter.save_embedding_cache(
+        ["id-1", "id-2"],
+        expected,
+        11,
+        path,
+        hidden_state_layer=-1,
+        embedding_type="hf_transformer",
+        pooling="mean",
+        registry_key="bert",
+        rulebook_id="cebra_nlp_public_local_cache_v1",
+        metadata_payload={
+            "dataset_name": "tiny",
+            "dataset_key": "tiny__unit",
+            "embedding_name": "bert",
+            "embedding_model_name": "bert-base-uncased",
+            "variant_tag": "bert__unit",
+        },
+    )
+    assert written == backend
+    validation = lec.validate_cache_npz(path, verification_mode="deep_ids")
+    assert validation["verification_status"] == "passed", validation
+    assert not validation["verification_errors"]
+    loaded = adapter.load_embedding_cache(path)
+    assert loaded is not None
+    assert loaded.backend == backend  # A fallback read must not satisfy this test.
+    ids, embeddings, seed, layers, layer, kind, pooling, rulebook, registry = loaded.payload
+    assert ids.tolist() == ["id-1", "id-2"]
+    np.testing.assert_array_equal(embeddings, expected)
+    assert seed == 11
+    assert layers is None
+    assert layer == -1
+    assert kind == "hf_transformer"
+    assert pooling == "mean"
+    assert rulebook == "cebra_nlp_public_local_cache_v1"
+    assert registry == "bert"
+    assert loaded.metadata["schema_version"] == 2
