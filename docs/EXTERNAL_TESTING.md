@@ -27,13 +27,18 @@ pytest -q tests/test_epoch_trajectory_e2e.py tests/test_trajectory_analysis_e2e.
 
 ## labenv_embedding_cache Adapter
 
-The public repo depends on `labenv-embedding-cache>=0.3.2`, so a normal pip or
+The public repo depends on `labenv-embedding-cache>=0.4.0,<0.5`, so a normal pip or
 uv install should pull the published cache library before running the adapter
 test:
 
 ```bash
 pytest -q tests/test_embedding_cache_adapter.py
 ```
+
+The adapter test also writes, validates, and loads a real V2 NPZ using the
+installed 0.4.x library, with exact IDs, embeddings, and metadata checks. The
+`cache-compatibility` CI installs published 0.4.0 on Python 3.11 and 3.12, runs
+these tests, and checks the installed dependency set with `pip check`.
 
 The fallback path is covered by the same test module through monkeypatched
 import behavior; do not remove the fallback because it keeps source checkouts
